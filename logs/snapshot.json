@@ -1,0 +1,18 @@
+{
+  "timestamp": "2026-09-09T21:03:31.063556",
+  "mode": "EXECUTOR",
+  "symbol": "XAUUSDm",
+  "equity": 5198659.51,
+  "balance": 5198659.51,
+  "initial_equity": 5198659.51,
+  "open_positions": 0,
+  "positions": [],
+  "drawdown_pct": 0.0,
+  "effective_risk_pct": 1.0,
+  "day_trades": 0,
+  "day_pnl": 0.0,
+  "consecutive_losses": 0,
+  "halted": false,
+  "halt_reason": "",
+  "stop_file": false
+}

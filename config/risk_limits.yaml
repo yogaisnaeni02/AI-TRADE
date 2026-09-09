@@ -1,0 +1,128 @@
+# BATASAN RISIKO - MODE AGRESIF
+#
+# File ini SENGAJA dipisah dari settings.yaml agar setiap perubahan
+# batas risiko menjadi tindakan yang disadari, bukan efek samping.
+#
+# Angka di sini dikunci di level kode: risk manager MENOLAK eksekusi
+# yang melanggarnya. Jangan longgarkan saat sedang rugi - limit ini
+# justru dibuat untuk momen tersebut.
+
+# Equity simulasi untuk mode demo. XAUUSD butuh minimal Rp 3,7 juta agar
+# SL 650 pip (ATR x1.5) menghasilkan risiko 3% pada lot minimum 0,01.
+simulated_equity_idr: 3700000
+
+# Equity minimum agar bot mau membuka posisi. Melindungi dari akun kosong
+# atau akun yang baru saja terkena stop out.
+#
+# Rp 3,7 juta adalah ambang teknis XAUUSD: di bawah itu lot minimum (0,01)
+# dengan SL 400 pip memaksa risiko di atas 2% per trade.
+min_equity_idr: 3700000
+
+# Tiered sizing: dua tingkat sinyal, keduanya terbukti untung, risiko
+# beda sesuai jarak ke breakeven.
+#   full    (mom_24 > 100% ambang): WR 32,25% | +6,84% vs BE -> risiko penuh
+#   reduced (mom_24 > 50% ambang) : WR 28,01% | +2,60% vs BE -> risiko separuh
+# Di bawah 50% ambang TIDAK diambil - pengujian menunjukkan tier itu rugi.
+# Lihat docs/18-TIERED-SIZING.md
+tiered_sizing:
+  reduced_risk_multiplier: 0.5   # tier "reduced" pakai 50% dari risiko normal
+
+# Setup frequent_micro (eksperimental, run_bot_frequent.py) - marjin
+# keuntungan hanya +0,21% di atas breakeven. Risiko dikecilkan lebih jauh
+# dan batas harian diperketat sebagai pengaman tambahan.
+frequent_micro_risk_multiplier: 0.5   # dikalikan LAGI setelah tiered (jadi 0.25x dari full)
+frequent_micro_max_daily_trades: 15
+
+per_trade:
+  # DIREVISI (9 Sep 2026) setelah simulasi risiko.
+  #
+  # Dengan winrate 26,6%, rentetan 10-15 loss beruntun adalah NORMAL.
+  # Simulasi 500 skenario x 300 trade:
+  #   risiko 3%  -> maxDD 58,5% | P(DD>30%) 99% | hasil akhir 1,08x
+  #   risiko 1%  -> maxDD 25,0% | P(DD>30%) 28% | hasil akhir 1,17x
+  #
+  # Risiko 1% menghasilkan LEBIH BESAR dengan drawdown kurang dari
+  # separuhnya. Pada winrate rendah, risiko besar menggerus basis
+  # compounding lewat kerugian beruntun.
+  #
+  # 1% masih 2x standar profesional (0,5%) - tetap agresif.
+  max_risk_percent: 1.0
+  min_rr_ratio: 2.0           # dinaikkan sebagai kompensasi risiko besar
+  max_lot_percent_equity: 5.0 # hard cap absolut
+
+daily:
+  max_loss_percent: 4.0       # = 4 loss beruntun pada risiko 1%
+  max_trades: 6               # kualitas di atas kuantitas
+  max_consecutive_losses: 3   # stop sisa hari, bukan sekadar jeda
+
+weekly:
+  max_loss_percent: 8.0       # stop sisa minggu, evaluasi wajib
+
+global:
+  max_drawdown_percent: 20.0  # MATIKAN SISTEM - butuh reset manual
+  max_open_positions: 1       # jangan pernah dinaikkan
+
+# Position sizing adaptif - lot lebih besar saat keyakinan sinyal tinggi.
+#
+# NONAKTIF secara default, dan itu disengaja.
+#
+# Menaikkan lot hanya menguntungkan bila skor keyakinan benar-benar
+# memprediksi hasil. Pada setup saat ini korelasi skor-hasil = -0,006
+# (praktis nol): skor 8 menghasilkan WR 33,0%, skor 7 menghasilkan 33,7%.
+# Menaikkan lot berdasar skor semacam itu = membesarkan taruhan acak.
+#
+# Simulasi 1000 skenario (200 trade):
+#   lot tetap 3%       -> median 0,81x | bangkrut  1,5%
+#   lot 2x acak        -> median 0,66x | bangkrut 17,4%
+#   lot 3x acak        -> median 0,42x | bangkrut 42,8%
+#   lot 2x saat WR 55% -> median 1,52x  <- menguntungkan HANYA di sini
+#
+# SYARAT AKTIVASI: forward test membuktikan sinyal ber-confidence tinggi
+# menghasilkan winrate minimal 10 poin di atas sinyal biasa, pada minimal
+# 100 trade. Sebelum itu, biarkan false.
+adaptive_sizing:
+  enabled: false
+  max_multiplier: 2.0         # batas keras, tidak boleh lebih
+  tiers:
+    - {min_confidence: 0.60, multiplier: 1.0}
+    - {min_confidence: 0.70, multiplier: 1.5}
+    - {min_confidence: 0.80, multiplier: 2.0}
+
+# De-risking otomatis saat drawdown membesar
+derisking:
+  - {drawdown_above: 10.0, reduce_risk_to: 0.75}
+  - {drawdown_above: 15.0, reduce_risk_to: 0.50}
+  - {drawdown_above: 20.0, action: STOP_SYSTEM}
+
+# Live deployment bertahap - jangan langsung 3%
+live_ramp:
+  month_1: 0.5                # verifikasi eksekusi nyata dulu
+  month_2: 0.75               # naik jika bulan 1 sesuai ekspektasi
+  month_3_plus: 1.0           # penuh jika konsisten
+
+# Penarikan modal - diputuskan SEKARANG, saat belum ada uang di meja
+withdrawal:
+  at_equity_multiple: 2.0     # saat modal Rp 1.600.000
+  withdraw_amount_idr: 800000 # tarik modal awal, lanjut dengan profit saja
+
+# Kill switch
+circuit_breaker:
+  stop_file: "STOP"           # file di root -> tolak semua entry baru
+  mt5_disconnect_seconds: 30
+  spread_abnormal_multiplier: 2.0
+  consecutive_order_failures: 3
+  price_anomaly_atr_multiple: 10
+
+# Blackout berita - fail-safe: jika sumber kalender gagal, JANGAN trading
+news_filter:
+  minutes_before: 15
+  minutes_after: 30
+  fail_closed: true           # sumber gagal -> tidak trading (bukan sebaliknya)
+
+# Praktik yang DILARANG - dikunci di kode, bukan sekadar catatan
+forbidden:
+  martingale: true
+  grid_without_sl: true
+  averaging_down: true
+  trading_without_sl: true
+  widening_sl: true

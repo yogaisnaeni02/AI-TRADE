@@ -1,0 +1,127 @@
+# Konfigurasi Sistem XAUUSD Trading Assistant
+#
+# Semua angka di sini berasal dari hasil probe broker (docs/broker-specs.md),
+# bukan asumsi. Jangan ubah tanpa menjalankan ulang probe.
+
+broker:
+  name: Exness
+  server: Exness-MT5Trial17
+  account: 463942909
+  account_type: Standard      # bukan Cent - sudah diverifikasi layak
+  currency: IDR
+  leverage: 2000
+  server_utc_offset: 7        # terverifikasi: waktu server = WIB = UTC+7
+
+symbol:
+  name: XAUUSDm               # WAJIB pakai akhiran 'm' (konvensi Exness)
+                              # JANGAN pakai XAUUSD, BTCXAUm, atau XAUUSD247m
+  digits: 3
+  point: 0.001                # 1 pip gold (0.01) = 10 points di broker ini
+  pip_in_points: 10           # faktor konversi point -> pip
+  contract_size: 100.0
+  tick_value_idr: 1747.96
+  value_per_point_idr: 1748.36
+  volume_min: 0.01
+  volume_step: 0.01
+  volume_max: 200.0
+  stops_level: 0              # tidak ada jarak SL/TP minimum
+
+# Biaya transaksi - hasil pengukuran, bukan estimasi
+costs:
+  spread_points: 260          # = 26 pip. FIXED di semua sesi (akun Standard)
+  spread_is_fixed: true       # tidak melebar/menyempit per sesi
+  spread_max_accept: 400      # tolak entry di atas ini (= 40 pip)
+  swap_long: -526.4           # mahal - hindari posisi menginap
+  swap_short: 0.0
+  slippage_assume_points: 30  # asumsi backtest (= 3 pip)
+
+# Jarak SL/TP - DIREVISI karena spread 26 pip
+# Rencana awal (SL 20 pip) tidak layak: biaya 130% dari risiko
+trade_distances:
+  # FINAL (9 Sep 2026) - hasil pengujian sistematis pada 100.000 bar M5.
+  #
+  # Perjalanan kalibrasi:
+  #   SL 200 pts  -> lot minimum memaksa risiko 6,6% (ditolak)
+  #   SL 1500 pts -> masih di dalam noise 1 bar, WR anjlok 23,8% (ditolak)
+  #   SL 6500 pts -> terlalu lebar, E=-0,145R (ditolak)
+  #   SL 4000 pts -> OPTIMAL, terukur lewat uji entry acak
+  #
+  # RR 1:3 dipakai: TP = 3x SL.
+  sl_min_points: 3500         # = 350 pip
+  sl_typical_points: 4000     # = 400 pip
+  sl_max_points: 4500         # = 450 pip
+  tp_min_points: 12000        # = 1200 pip (RR 1:3)
+  min_rr_ratio: 3.0
+  atr_sl_multiplier: 1.0      # ATR median ~424 pip -> jatuh di rentang di atas
+
+# Manajemen posisi - hasil uji varian
+position_management:
+  # RIWAYAT PENGUJIAN (9 Sep 2026) - ringkas, urutan kronologis.
+  # Semua pada 8.971 entry, sampel besar, anti-lookahead.
+  #
+  #   tanpa trailing sama sekali        E=+0,0319R  Q+ 3/6  (baseline)
+  #   trigger pip absolut (80 pip)      E=-0,0398R  Q+ 1/6  (gagal - trigger tll dini)
+  #   trigger %TP tanpa ATR (70%)       E=+0,0069R  Q+ 3/6  (kalah dari terpilih)
+  #   momentum-reversal exit            E=+0,0208R  Q+ 4/6  (kalah dari terpilih)
+  #   trigger 80% jarak TP + ATR x2,0   E=+0,0308R  Q+ 4/6  <- DIPILIH
+  #
+  # DIAKTIFKAN atas permintaan eksplisit setelah pola berulang: "profit besar
+  # berbalik jadi rugi penuh" (54,3% dari semua trade sempat profit >=80 pip
+  # lalu SL penuh). Trade-off yang disadari: expectancy turun tipis
+  # (-0,0011R) demi konsistensi lebih baik (4/6 vs 3/6 kuartal positif).
+  # Trailing MENGURANGI (bukan menghilangkan) kejadian itu - tidak bisa
+  # tahu masa depan, jadi selalu ada kompromi. Detail lengkap semua
+  # percobaan: docs/14-TRAILING-80PIP.md bagian 8.
+  #
+  # Mekanisme: breakeven_at_r = ambang trigger dalam satuan R (bukan geser
+  # ke breakeven - begitu tercapai, trailing ATR langsung aktif dari harga
+  # saat itu). Pada RR 1:3, 80% jarak TP = 2,4R.
+  breakeven_at_r: 2.4          # trigger di 80% jarak TP (RR 1:3 -> 2,4R)
+  trail_atr_mult: 2.0          # trailing ATR x2,0 setelah trigger tercapai
+  max_bars_hold: 48           # 4 jam
+
+# Setup aktif. london_sweep & ny_momentum dinonaktifkan - keduanya
+# terbukti berkinerja di bawah entry acak pada data ini.
+active_setups:
+  # momentum_fib dipilih sebagai kandidat forward test: satu-satunya
+  # konfigurasi dari 11 yang diuji yang mencapai 4/5 fold walk-forward
+  # positif. Expectancy-nya tipis (+0,016R) sehingga forward test
+  # diperlukan untuk memastikan bukan kebetulan.
+  #
+  # ny_vol_window tetap tersedia di kode tetapi tidak aktif - hanya
+  # 2/5 fold positif.
+  - momentum_fib
+
+timeframes:
+  primary: M5                 # timeframe eksekusi utama
+  entry_timing: M1            # hanya untuk presisi entry
+  context: [M15, H1, H4]      # filter bias arah
+
+# Data historis yang tersedia (hasil probe 9 Sep 2026)
+data:
+  max_bars_per_request: 50000 # batas teknis MT5 - download bertahap di atas ini
+  available:
+    M1: 50000                 # ~7 minggu - terbatas
+    M5: 50000                 # ~8.5 bulan - cukup untuk mulai
+    M15: 50000                # ~2 tahun
+    H1: 31000                 # ~5 tahun
+    H4: 15000                 # ~9 tahun
+
+# Sesi trading - waktu server = WIB (UTC+7), terverifikasi
+# Spread fixed, jadi pemilihan sesi berdasar VOLATILITAS bukan biaya
+sessions:
+  timezone_note: "server = WIB = UTC+7 (selisih 0 jam, terverifikasi)"
+  asia:            {start: "06:00", end: "14:00", trade: false}
+  london_open:     {start: "14:00", end: "17:00", trade: true}
+  london_ny:       {start: "19:30", end: "23:00", trade: true}
+  ny_afternoon:    {start: "23:00", end: "04:00", trade: false}
+  friday_cutoff:   "21:00"    # tidak ada entry baru setelah ini
+
+mode: EXECUTOR                # OBSERVER -> ADVISOR -> EXECUTOR
+                              # jangan naikkan sebelum lulus gate tiap tahap
+
+# Notifikasi Telegram (opsional). Isi keduanya untuk mengaktifkan.
+# Panduan setup: lihat docstring di src/monitoring/notifier.py
+telegram:
+  bot_token: ""    # dari @BotFather
+  chat_id: ""       # dari api.telegram.org/bot<TOKEN>/getUpdates

@@ -1,0 +1,4 @@
+ticket,symbol,direction,lot,entry_time,entry_price,exit_time,exit_price,pnl_idr,commission,swap,net_idr,r_multiple,duration_min,comment
+2517490337,XAUUSDm,buy,0.02,2026-09-09T15:16:09,4404.285000000001,2026-09-09T15:16:11,4404.177,-3861.47,0.0,0.0,-3861.47,,0.0,test_exec
+2517514924,XAUUSDm,buy,0.02,2026-09-09T15:22:10,4403.747,2026-09-09T15:22:13,4403.228,-18079.72,0.0,0.0,-18079.72,,0.1,demo_siklus
+2519084720,XAUUSDm,buy,0.01,2026-09-09T20:15:01,4413.544,2026-09-09T20:21:30,4417.594,70579.08,0.0,0.0,70579.08,,6.5,momentum_fib_6
