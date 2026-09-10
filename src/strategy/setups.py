@@ -102,23 +102,33 @@ class RuleEngine:
         self.atr_lo = float(mf.get("atr_percentile_min", 0.20))
         self.atr_hi = float(mf.get("atr_percentile_max", 0.95))
 
-        # Filter konfluensi (candle searah + ADX). MATI secara default.
+        # Filter konfluensi (candle searah + ADX + tren M5). MATI default.
         #
-        # Kandidat terkuat yang pernah lolos uji holdout tersegel:
-        # di 30% data yang tidak pernah dipakai memilih, expectancy naik
-        # +0,026R -> +0,128R sambil menyisakan 71% trade. Perbaikan di
-        # holdout JUSTRU LEBIH BESAR daripada di periode seleksi (+0,102R
-        # vs +0,053R) - kebalikan dari pola overfitting.
+        # Kandidat terkuat di proyek ini. Diukur dengan halt DD dimatikan
+        # tetapi batas harian TETAP AKTIF (metode yang benar - batas harian
+        # adalah bagian dari sistem yang akan berjalan live; lihat docs/38):
+        #
+        #             tanpa filter    dengan filter
+        #   n              675             519  (77%)
+        #   E[R]        +0,1327         +0,2510
+        #   t             +1,95           +3,14   <- lampaui ambang ~3,0
+        #   walk-forward    3/5             5/5
+        #   holdout 30%  +0,0748         +0,2805
+        #
+        # t=3,14 melampaui ambang Bonferroni ~3,0 yang ditetapkan docs/30
+        # setelah 50+ percobaan pada data M5 yang sama. Ini satu-satunya
+        # angka di proyek ini yang mencapainya - momentum_fib sendiri 1,95.
+        #
+        # Yang membuatnya bisa dipercaya: HOLDOUT 30% TERSEGEL juga positif
+        # (+0,2805), dan data itu tidak pernah dipakai memilih filter.
         #
         # Tetap dimatikan karena docs/29 melarang mengubah logika sinyal
-        # selama forward test berjalan, dan t=1,99 masih di bawah ambang
-        # Bonferroni 2,69 untuk 22 filter yang diuji.
-        #
-        # Cara mengaktifkan (SETELAH forward test selesai):
+        # selama forward test berjalan. Aktifkan SETELAH forward test:
         #     momentum_fib:
         #       confluence_filter: true
         #
-        # Pengukuran lengkap 22 filter: docs/36-UJI-GABUNGAN-TEKNIK.md
+        # Pengukuran lengkap: docs/36-UJI-GABUNGAN-TEKNIK.md (30 filter),
+        # docs/37-UJI-BOS-CHOCH.md (BOS/CHoCH gagal), docs/38 (metode).
         self.confluence_filter = bool(mf.get("confluence_filter", False))
         self.confluence_adx_min = float(mf.get("confluence_adx_min", 25.0))
 
