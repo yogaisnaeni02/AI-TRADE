@@ -202,3 +202,66 @@ manual `logs/risk_state.json` setelah dievaluasi.
 Filter konfluensi tidak menghilangkan ini (maxDD dengan filter 20,8% vs
 20,4% tanpa) — yang menurunkan drawdown adalah **ukuran risiko per trade**,
 persis seperti kesimpulan rekan kerja di `docs/30` bagian 1.5.
+
+---
+
+## 8. Rekonsiliasi Setelah Merge Kedua (10 Sep 2026, malam)
+
+Rekan kerja menandai satu blocker di `docs/31`: angka baseline "tanpa
+filter" tidak cocok antara `docs/38` (n=675, t=1,95) dan pengukuran mereka
+pasca-merge (n=897, t=2,14). Diselesaikan di sini.
+
+### Temuan mereka yang mengubah data
+
+`fix_time_offset.py` hanya menggeser kolom `time_utc`, **tidak menghitung
+ulang kolom turunannya**. File `data/processed/` punya `time_utc` benar
+tetapi `session`, `is_trading_session`, `hour_utc`, `asia_high/low`, dan
+`sweep_*` masih nilai lama yang meleset 7 jam.
+
+Mereka membangun ulang file fitur dari raw. Diverifikasi di sesi ini:
+
+```
+label sesi tersimpan cocok dgn time_utc : 100,0%
+is_trading_session True                 : 100,0%
+```
+
+Sebelum rebuild, backtest memblokir 7 jam penuh (06–13 UTC, termasuk
+seluruh sesi London) sementara bot live menghitung sesi dengan benar —
+backtest dan live menguji jam yang berbeda. Temuan yang bagus.
+
+### Angka konfluensi diukur ulang pada data hasil rebuild
+
+| | Tanpa filter | Dengan filter |
+|---|---|---|
+| Sinyal | 4.189 | 2.038 |
+| n | 675 | **519** (77%) |
+| E[R] | +0,1327 | **+0,2510** |
+| t | +1,95 | **+3,14** |
+| Paruh-1 / Paruh-2 | +0,133 / +0,132 | +0,207 / +0,298 |
+| Holdout 30% | +0,0748 | **+0,2805** |
+
+**Identik sampai empat desimal dengan `docs/36` dan `docs/38`.** Angka
+konfluensi tidak terpengaruh rebuild, jadi tetap sahih.
+
+### Kenapa n=675 vs n=897 berbeda
+
+Selisihnya **bukan** data, melainkan guardrail mana yang dimatikan:
+
+| Cara mengukur | n | E[R] | t |
+|---|---|---|---|
+| Hanya halt DD dimatikan (dipakai docs/36 & 38) | **675** | +0,1327 | +1,95 |
+| Semua guardrail dimatikan | 909 | +0,0733 | +1,27 |
+| min_score 6, hanya halt DD | 796 | +0,1501 | +2,39 |
+
+Angka 897 tidak tereproduksi pada kombinasi mana pun dengan file fitur
+sekarang — kemungkinan besar diukur **sebelum** rebuild mereka sendiri
+selesai, atau dengan `min_score` berbeda.
+
+**Yang penting:** perbandingan konfluensi selalu memakai baseline dan
+metode yang SAMA (675, hanya halt DD dimatikan), diukur pada file yang
+sama, dalam satu proses. Jadi selisih +0,1327 → +0,2510 sahih apa pun
+angka absolut baseline yang dipilih.
+
+Blocker ini **selesai**: bukan ketidakcocokan data, melainkan dua cara
+mengukur yang berbeda. Standar yang dipakai ke depan: **hanya halt DD yang
+dimatikan**, sesuai alasan di bagian 2.
