@@ -1,0 +1,19 @@
+# Dependensi AI-TRADE.
+#
+# Versi dipatok agar hasil di mesin lain identik. MetaTrader5 hanya
+# tersedia di Windows - modul data/eksekusi tidak bisa jalan di OS lain,
+# tetapi backtest dan tes risk manager tetap bisa.
+#
+#   python -m venv .venv
+#   .venv\Scripts\activate          (Windows)
+#   pip install -r requirements.txt
+
+MetaTrader5==5.0.5735
+pandas>=2.2,<3.1
+numpy>=1.26,<3
+pyarrow>=15
+PyYAML>=6.0
+lightgbm>=4.3
+scikit-learn>=1.4
+streamlit>=1.33
+requests>=2.31

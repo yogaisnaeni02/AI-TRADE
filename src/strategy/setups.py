@@ -96,6 +96,12 @@ class RuleEngine:
         else:
             self.momentum_sessions = None
 
+        # Gate ATR untuk momentum_fib, dari config agar bisa dikalibrasi
+        # ulang tanpa menyentuh kode. Lihat catatan panjang di _momentum_fib.
+        mf = self.cfg.get("momentum_fib", {}) or {}
+        self.atr_lo = float(mf.get("atr_percentile_min", 0.20))
+        self.atr_hi = float(mf.get("atr_percentile_max", 0.95))
+
     # -- helper ----------------------------------------------------------
 
     def _price_to_points(self, price_diff: float) -> float:
@@ -321,7 +327,32 @@ class RuleEngine:
             return None
 
         # ATR dalam rentang normal adalah SYARAT, bukan bonus skor.
-        if not (0.30 <= row.atr_percentile <= 0.85):
+        #
+        # DILONGGARKAN 0,30-0,85 -> 0,20-0,95 (10 Sep 2026), dari config.
+        #
+        # Rentang lama mencekik frekuensi: momentum_fib hanya menghasilkan
+        # ~106 trade dalam 1,4 tahun, dan pada laju itu membuktikan edge
+        # +0,10R butuh ~29 tahun. Setup sebagus apa pun tidak berguna kalau
+        # tidak pernah bisa dibuktikan.
+        #
+        # Sapuan (scripts/sweep_frequency.py) menunjukkan pelonggaran gate
+        # ini menaikkan trade 106 -> 512 (5x) dengan expectancy IKUT NAIK
+        # (-0,018R -> +0,162R), bukan turun. Itu menandakan rentang lama
+        # membuang peluang bagus, bukan menyaring yang jelek. Melonggarkan
+        # gate LAIN (momentum, fib) tidak menambah apa pun, dan melonggarkan
+        # semuanya sekaligus justru hancur (WR 15,6%) - jadi spesifik gate
+        # ATR ini yang salah kalibrasi.
+        #
+        # Stabil di kedua paruh M5: +0,138R (Apr-Des 25) dan +0,156R
+        # (Des 25-Sep 26).
+        #
+        # BATAS KEPERCAYAAN - baca sebelum menaikkan risiko:
+        # t = 2,05 diperoleh setelah menguji 22 kombinasi pada data yang
+        # sama; ambang jujurnya ~2,9. Dan varian ini NEGATIF di M15
+        # (-0,141R atas 4,23 tahun), termasuk setelah SL dikalibrasi ulang.
+        # Boleh jadi edge-nya memang khas M5, boleh jadi ini artefak 1,4
+        # tahun data. Belum terjawab. Lihat docs/28-HASIL-KALIBRASI-ULANG.md
+        if not (self.atr_lo <= row.atr_percentile <= self.atr_hi):
             return None
 
         # Dua tier momentum, KEDUANYA terbukti untung, ukuran risiko beda:

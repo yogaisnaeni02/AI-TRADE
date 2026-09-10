@@ -65,8 +65,20 @@ trade_distances:
   sl_min_points: 3500         # = 350 pip
   sl_typical_points: 4000     # = 400 pip
   sl_max_points: 4500         # = 450 pip
-  tp_min_points: 12000        # = 1200 pip (RR 1:3)
-  min_rr_ratio: 3.0
+  tp_min_points: 11120        # = 1112 pip (RR 1:2,78 atas SL 4000)
+  # DIUBAH 10 Sep 2026: 3.0 -> 2.78 (permintaan pemilik, dan terukur lebih baik).
+  #
+  # RR efektif setelah spread 260 points, pada SL 4000:
+  #   RR 1:3.00 -> efektif 2.756, breakeven WR 26,62%
+  #   RR 1:2.78 -> efektif 2.549, breakeven WR 28,17%
+  #
+  # Breakeven WR memang naik 1,55pp, tapi TP yang lebih dekat lebih sering
+  # tercapai dan efek bersihnya positif: pada varian terpilih t naik dari
+  # 1,81 (RR 1:3) ke 2,05 (RR 1:2,78).
+  #
+  # CATATAN: winrate terukur 30,86% - margin ke breakeven tinggal 2,7pp.
+  # Jangan naikkan RR lebih jauh tanpa mengukur ulang.
+  min_rr_ratio: 2.78
   atr_sl_multiplier: 1.0      # ATR median ~424 pip -> jatuh di rentang di atas
 
 # Manajemen posisi - hasil uji varian
@@ -97,6 +109,18 @@ position_management:
 
 # Setup aktif. london_sweep & ny_momentum dinonaktifkan - keduanya
 # terbukti berkinerja di bawah entry acak pada data ini.
+# Gate momentum_fib. Dilonggarkan 10 Sep 2026 dari 0,30-0,85.
+#
+# Alasan lengkap ada di docstring src/strategy/setups.py::_momentum_fib.
+# Ringkasnya: rentang lama mencekik frekuensi (106 trade / 1,4 tahun,
+# butuh ~29 tahun untuk membuktikan edge). Melonggarkan gate ini menaikkan
+# trade 5x DAN menaikkan expectancy.
+#
+# Untuk kembali ke setelan lama: 0.30 / 0.85.
+momentum_fib:
+  atr_percentile_min: 0.20
+  atr_percentile_max: 0.95
+
 active_setups:
   # momentum_fib dipilih sebagai kandidat forward test: satu-satunya
   # konfigurasi dari 11 yang diuji yang mencapai 4/5 fold walk-forward
@@ -132,7 +156,10 @@ sessions:
   ny_afternoon:    {start: "23:00", end: "04:00", trade: false}
   friday_cutoff:   "21:00"    # tidak ada entry baru setelah ini
 
-mode: EXECUTOR                # OBSERVER -> ADVISOR -> EXECUTOR
+# ADVISOR = hasilkan sinyal + lewati semua guardrail, TAPI tidak kirim order.
+# Naikkan ke EXECUTOR hanya setelah forward test demo mengumpulkan ~200 trade
+# dengan expectancy tetap positif (docs/28-HASIL-KALIBRASI-ULANG.md bagian 4).
+mode: ADVISOR                # OBSERVER -> ADVISOR -> EXECUTOR
                               # jangan naikkan sebelum lulus gate tiap tahap
 
 # Notifikasi Telegram (opsional). Isi keduanya untuk mengaktifkan.

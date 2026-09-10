@@ -28,3 +28,6 @@ logs/*.tmp
 
 # Backup data sebelum perbaikan offset waktu (lokal saja, jangan di-commit)
 data_backup_pre_timefix/
+
+# Dataset turunan yang bisa dibangun ulang (pipeline.build_dataset)
+data/processed/XAUUSDm_M15_features.parquet
