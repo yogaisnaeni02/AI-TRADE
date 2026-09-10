@@ -467,7 +467,29 @@ class TradingBot:
         if not self.gw.is_trade_allowed():
             self.log("!! Algo trading tidak diizinkan di terminal — order akan gagal.")
 
-        self.risk.state.peak_equity = acc.equity
+        # Pulihkan state yang harus bertahan lintas restart.
+        #
+        # Sebelumnya baris ini menyetel peak_equity = equity saat ini, yang
+        # membuat drawdown selalu terbaca 0% setiap kali bot di-restart —
+        # sehingga kill switch global dan seluruh tangga derisking tidak
+        # pernah bisa menyala. Counter harian direkonsiliasi dari journal,
+        # bukan dimulai ulang dari nol.
+        self.risk.load_state()
+        self.risk.state.peak_equity = max(self.risk.state.peak_equity, acc.equity)
+        self.risk.refresh_from_journal(datetime.now())
+        self.risk.save_state()
+
+        if self.risk.state.halted:
+            self.log(f"!! Sistem dalam status HALT: {self.risk.state.halt_reason}")
+            self.log("!! Tidak ada entry baru sampai logs/risk_state.json di-reset manual.")
+
+        self.log(
+            f"Rem hari ini: {self.risk.state.day_trades}/{self.risk.max_daily_trades} trade"
+            f" | P/L Rp {self.risk.state.day_pnl:,.0f}"
+            f" | {self.risk.state.consecutive_losses}/{self.risk.max_consec_losses} loss beruntun"
+            f" | puncak equity Rp {self.risk.state.peak_equity:,.0f}"
+            f" (DD {self.risk.current_drawdown_pct(acc.equity):.1f}%)"
+        )
 
         try:
             while True:
@@ -482,6 +504,13 @@ class TradingBot:
                         self._last_bar_time = bar_time
                         self.process_bar(df)
 
+                    # Puncak equity diperbarui tiap siklus, bukan hanya saat
+                    # ada sinyal — drawdown yang terjadi selama bot tidak
+                    # menemukan setup tetap harus tercatat.
+                    acc_now = mt5.account_info()
+                    if acc_now is not None:
+                        self.risk.observe_equity(acc_now.equity)
+
                     self.write_snapshot()
 
                     # Catat trade yang baru tertutup ke journal.
@@ -491,8 +520,20 @@ class TradingBot:
                         n = sync_closed_trades(days_back=7)
                         if n:
                             self.log(f"Journal: {n} trade baru dicatat")
+                            # Rekonsiliasi rem risiko dari journal yang baru
+                            # diperbarui. Tanpa langkah ini batas harian,
+                            # mingguan, dan loss beruntun tidak pernah terisi.
+                            self.risk.refresh_from_journal(datetime.now())
+                            self.log(
+                                f"  Rem: {self.risk.state.day_trades}/{self.risk.max_daily_trades} trade"
+                                f" | P/L Rp {self.risk.state.day_pnl:,.0f}"
+                                f" | {self.risk.state.consecutive_losses}/{self.risk.max_consec_losses}"
+                                " loss beruntun"
+                            )
                     except Exception:  # noqa: BLE001
                         pass
+
+                    self.risk.save_state()
 
                 except Exception as e:  # noqa: BLE001
                     self.log(f"ERROR siklus: {type(e).__name__}: {e}")

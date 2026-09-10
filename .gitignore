@@ -21,3 +21,7 @@ logs/*.lock
 Thumbs.db
 .vscode/
 .idea/
+
+# Runtime state risk manager (bukan konfigurasi)
+logs/risk_state.json
+logs/*.tmp

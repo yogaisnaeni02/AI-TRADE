@@ -8,6 +8,8 @@ tidak ada jalur kode yang bisa melewatinya.
 
 from __future__ import annotations
 
+import csv
+import json
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
@@ -18,6 +20,9 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 RISK_PATH = ROOT / "config" / "risk_limits.yaml"
 SETTINGS_PATH = ROOT / "config" / "settings.yaml"
+LOG_DIR = ROOT / "logs"
+TRADES_CSV = LOG_DIR / "trades.csv"
+STATE_PATH = LOG_DIR / "risk_state.json"
 
 
 def load_risk_config() -> dict:
@@ -55,9 +60,20 @@ class SessionState:
 
 
 class RiskManager:
-    def __init__(self, config: Optional[dict] = None, risk: Optional[dict] = None):
+    def __init__(
+        self,
+        config: Optional[dict] = None,
+        risk: Optional[dict] = None,
+        journal_path: Optional[Path] = None,
+        state_path: Optional[Path] = None,
+    ):
         self.cfg = config or load_settings()
         self.risk = risk or load_risk_config()
+
+        # Jalur bisa di-override agar dapat diuji tanpa menyentuh logs/
+        # yang sesungguhnya.
+        self.journal_path = Path(journal_path) if journal_path else TRADES_CSV
+        self.state_path = Path(state_path) if state_path else STATE_PATH
 
         pt = self.risk["per_trade"]
         self.max_risk_pct = pt["max_risk_percent"]
@@ -89,18 +105,131 @@ class RiskManager:
 
     # -- state -----------------------------------------------------------
 
+    @staticmethod
+    def _week_start(d: date) -> date:
+        return date.fromordinal(d.toordinal() - d.weekday())
+
+    def _read_journal(self) -> list[tuple[datetime, float]]:
+        """Pasangan (waktu exit, net_idr) dari journal, terurut waktu."""
+        if not self.journal_path.exists():
+            return []
+
+        rows: list[tuple[datetime, float]] = []
+        try:
+            with open(self.journal_path, encoding="utf-8", newline="") as f:
+                for row in csv.DictReader(f):
+                    raw_time, raw_net = row.get("exit_time"), row.get("net_idr")
+                    if not raw_time or raw_net in (None, ""):
+                        continue
+                    try:
+                        rows.append((datetime.fromisoformat(raw_time), float(raw_net)))
+                    except ValueError:
+                        # Baris rusak atau header yang terduplikasi — lewati,
+                        # jangan sampai menjatuhkan seluruh rekonsiliasi.
+                        continue
+        except OSError:
+            return []
+
+        rows.sort(key=lambda r: r[0])
+        return rows
+
+    def refresh_from_journal(self, now: datetime) -> None:
+        """
+        Bangun ulang counter harian dan mingguan dari riwayat trade.
+
+        Sumber kebenarannya `logs/trades.csv`, yang diisi dari riwayat deal
+        MT5 — bukan variabel di memori. Dua alasan:
+
+        1. Counter di memori tidak pernah terisi. `record_trade()` tidak
+           punya satu pun pemanggil, sehingga batas harian, mingguan, dan
+           loss beruntun tidak pernah menyala sama sekali.
+        2. Bahkan bila diisi, counter di memori hilang setiap restart —
+           persis di momen ketika orang paling mungkin me-restart bot,
+           yaitu saat sedang rugi.
+
+        Merekonsiliasi dari journal menyelesaikan keduanya sekaligus, dan
+        bersifat idempoten: aman dipanggil berkali-kali per siklus.
+        """
+        today = now.date()
+        monday = self._week_start(today)
+        rows = self._read_journal()
+
+        day_nets = [net for t, net in rows if t.date() == today]
+        self.state.day_pnl = sum(day_nets)
+        self.state.day_trades = len(day_nets)
+
+        # Loss beruntun dihitung dari ekor hari ini, bukan sepanjang riwayat,
+        # agar konsisten dengan semantik "stop sisa hari".
+        streak = 0
+        for net in reversed(day_nets):
+            if net >= 0:
+                break
+            streak += 1
+        self.state.consecutive_losses = streak
+
+        self.state.week_pnl = sum(
+            net for t, net in rows if self._week_start(t.date()) == monday
+        )
+
+    def load_state(self) -> None:
+        """
+        Muat state yang harus bertahan lintas restart.
+
+        Hanya `peak_equity` dan status halt — sisanya direkonstruksi dari
+        journal, yang lebih dapat dipercaya daripada snapshot di disk.
+        """
+        if not self.state_path.exists():
+            return
+        try:
+            with open(self.state_path, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            return
+
+        try:
+            self.state.peak_equity = float(data.get("peak_equity") or 0.0)
+        except (TypeError, ValueError):
+            self.state.peak_equity = 0.0
+        self.state.halted = bool(data.get("halted", False))
+        self.state.halt_reason = str(data.get("halt_reason", "") or "")
+
+    def save_state(self) -> None:
+        """Tulis state atomik (tulis ke .tmp lalu replace) agar crash di
+        tengah penulisan tidak meninggalkan file rusak."""
+        payload = {
+            "peak_equity": self.state.peak_equity,
+            "halted": self.state.halted,
+            "halt_reason": self.state.halt_reason,
+            "saved_at": datetime.now().isoformat(),
+        }
+        try:
+            self.state_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.state_path.with_suffix(".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2)
+            tmp.replace(self.state_path)
+        except OSError:
+            pass
+
+    def observe_equity(self, equity: float) -> float:
+        """
+        Perbarui puncak equity dan kembalikan drawdown saat ini.
+
+        Dipanggil tiap siklus, bukan hanya saat ada sinyal — kalau puncak
+        hanya diperbarui ketika `check()` berjalan, drawdown yang terjadi
+        selama tidak ada sinyal tidak akan pernah tercatat.
+        """
+        self.state.peak_equity = max(self.state.peak_equity, equity)
+        return self.current_drawdown_pct(equity)
+
     def _roll_period(self, now: datetime, equity: float) -> None:
         today = now.date()
-        if self.state.day != today:
-            self.state.day = today
-            self.state.day_pnl = 0.0
-            self.state.day_trades = 0
-            self.state.consecutive_losses = 0
+        monday = self._week_start(today)
 
-        monday = today.fromordinal(today.toordinal() - today.weekday())
-        if self.state.week_start != monday:
+        if self.state.day != today or self.state.week_start != monday:
+            self.state.day = today
             self.state.week_start = monday
-            self.state.week_pnl = 0.0
+            self.refresh_from_journal(now)
 
         self.state.peak_equity = max(self.state.peak_equity, equity)
 
@@ -219,6 +348,7 @@ class RiskManager:
         if dd >= self.max_dd_pct:
             self.state.halted = True
             self.state.halt_reason = f"drawdown {dd:.1f}% >= {self.max_dd_pct}%"
+            self.save_state()
             return RiskDecision(False, self.state.halt_reason)
 
         if news_blackout:
@@ -266,6 +396,14 @@ class RiskManager:
     # -- update setelah trade --------------------------------------------
 
     def record_trade(self, pnl: float) -> None:
+        """
+        Pembaruan counter secara langsung.
+
+        Otoritas sebenarnya ada di `refresh_from_journal()`, yang akan
+        menimpa nilai-nilai ini pada rekonsiliasi berikutnya. Method ini
+        berguna untuk pengujian dan untuk pembaruan segera setelah sebuah
+        posisi tertutup, sebelum journal sempat disinkronkan.
+        """
         self.state.day_pnl += pnl
         self.state.week_pnl += pnl
         self.state.day_trades += 1
@@ -280,6 +418,7 @@ class RiskManager:
         if self.state.order_failures >= limit:
             self.state.halted = True
             self.state.halt_reason = f"{self.state.order_failures} order gagal beruntun"
+            self.save_state()
             return True
         return False
 
@@ -289,3 +428,4 @@ class RiskManager:
     def halt(self, reason: str) -> None:
         self.state.halted = True
         self.state.halt_reason = reason
+        self.save_state()
