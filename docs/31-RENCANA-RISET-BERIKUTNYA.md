@@ -32,6 +32,51 @@ apa pun (terbukti terbalik: skor 6 = +0,361R, skor 8 = −0,219R).
 
 ---
 
+## 1b. STATUS — diperbarui 10 Sep 2026 setelah riset paralel
+
+Sesi paralel (PC kantor) sudah mengeksekusi sebagian rencana ini. Hasilnya
+di `docs/34`–`docs/38`. Tabel ini menggantikan status di bagian 2.
+
+| # | ide | status | hasil |
+|---|---|---|---|
+| 1 | Entry presisi M1 | **SELESAI** | **Gagal.** 6 varian; 5 memperburuk, 1 tidak stabil saat dibelah. `docs/35` |
+| 4 | BOS/CHoCH filter | **SELESAI** | **Gagal** sebagai filter. Tapi menemukan BUG: kolom `choch` tidak pernah menyala sekali pun dalam 100.000 bar — kondisinya mustahil. Sudah diperbaiki + 4 tes. `docs/37` |
+| — | **Filter konfluensi** (candle searah + ADX + tren M5) | **SELESAI, LOLOS** | t = **3,14**, melampaui ambang Bonferroni ~3,0. Holdout 30% tersegel juga positif (+0,2805). **Satu-satunya angka di proyek ini yang lolos ambang jujur.** Sengaja dimatikan sampai forward test selesai. `docs/36` |
+| 2 | Blackout berita | belum | |
+| 3 | Lintas-sesi Tokyo→London | belum | **naik prioritas** — baru bisa diukur benar setelah `sessions.py` dikoreksi |
+| 5 | DXY H4 bias arah | belum | |
+| 6 | Profil volatilitas per jam | belum | **naik prioritas** — alasan sama dengan #3 |
+| 7 | Panel insight dashboard | belum | |
+| 8 | Ukur ulang docs/25 & 26 | belum | keduanya diukur pada jam yang salah |
+| 9 | COT + yield riil | belum | hanya relevan bila jalur H1 dijalankan |
+
+### Yang harus dikerjakan SEBELUM riset baru
+
+**Rekonsiliasi angka baseline.** Dua pengukuran "tanpa filter" tidak cocok:
+
+| sumber | n | E[R] | t |
+|---|---|---|---|
+| `docs/38` (sesi paralel) | 675 | +0,1327 | 1,95 |
+| pengukuran pasca-merge | 897 | +0,1254 | 2,14 |
+
+Arahnya sama, besarannya tidak. Kemungkinan beda `min_score`, atau diukur
+sebelum `sessions.py` dikoreksi. **Selama ini belum disamakan, angka
+konfluensi (t=3,14) juga belum bisa dipercaya sepenuhnya** — ia dibandingkan
+terhadap baseline yang mana?
+
+Ini pekerjaan setengah jam dan memblokir semua keputusan lain.
+
+### Pelajaran dari dua item yang gagal
+
+M1 dan BOS/CHoCH adalah dua ide dengan nilai tertinggi di daftar awal, dan
+keduanya gagal. Itu bukan kerugian — itu menutup dua cabang mahal dengan
+murah. Yang justru berhasil (konfluensi) tidak ada di daftar sama sekali.
+
+Konsekuensinya untuk ide yang tersisa: perlakukan urutan prioritas di
+bagian 2 sebagai tebakan, bukan ramalan.
+
+---
+
 ## 2. Daftar prioritas
 
 | # | ide | jenis | nilai | biaya | informasi baru? | status |
