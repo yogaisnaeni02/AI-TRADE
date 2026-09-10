@@ -85,6 +85,21 @@ class Backtester:
         self.spread = self.cfg["costs"]["spread_points"]
         self.slippage = self.cfg["costs"]["slippage_assume_points"]
 
+        # Lama tahan posisi diambil dari config yang SAMA dengan yang dibaca
+        # bot live (src/execution/bot.py: position_management.max_bars_hold).
+        #
+        # BUG YANG DIPERBAIKI (10 Sep 2026): nilai ini dulu di-hardcode 120
+        # sebagai default argumen _simulate(), dan run() tidak pernah
+        # mengopernya. Backtest karena itu menahan posisi sampai 10 jam
+        # sementara bot live memotong di 4 jam — dua sistem yang berbeda.
+        #
+        # Efeknya bukan cuma beda hasil: posisi yang menahan 10 jam memblokir
+        # sinyal berikutnya (satu posisi pada satu waktu), sehingga jumlah
+        # trade backtest jauh lebih kecil dari yang bisa dicapai live dan
+        # setiap pengukuran per sesi kekurangan sampel.
+        pm = self.cfg.get("position_management", {})
+        self.max_bars_hold = pm.get("max_bars_hold", 48)
+
         self.risk_pct = self.risk["per_trade"]["max_risk_percent"]
         self.max_daily_loss = self.risk["daily"]["max_loss_percent"]
         self.max_daily_trades = self.risk["daily"]["max_trades"]
@@ -148,10 +163,13 @@ class Backtester:
         df: pd.DataFrame,
         sig: pd.Series,
         equity: float,
-        max_bars: int = 120,
+        max_bars: Optional[int] = None,
         breakeven_at_r: Optional[float] = None,
         trail_atr_mult: Optional[float] = None,
     ) -> Optional[Trade]:
+        if max_bars is None:
+            max_bars = self.max_bars_hold
+
         entry_idx = int(sig["idx"]) + 1  # eksekusi bar berikutnya
         if entry_idx >= len(df):
             return None
@@ -284,11 +302,22 @@ class Backtester:
         self,
         df: pd.DataFrame,
         signals: pd.DataFrame,
-        initial_equity: float = 800_000,
+        initial_equity: Optional[float] = None,
         breakeven_at_r: Optional[float] = None,
         trail_atr_mult: Optional[float] = None,
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
-        """Jalankan backtest dengan seluruh batasan risiko aktif."""
+        """
+        Jalankan backtest dengan seluruh batasan risiko aktif.
+
+        initial_equity default mengikuti risk_limits.simulated_equity_idr,
+        bukan angka 800.000 seperti sebelumnya. Pada equity 800.000 lot
+        minimum 0,01 memaksa risiko ~8,7% per trade, sehingga setiap kurva
+        equity, max drawdown, dan pemicu `halted` yang dihitung dengan
+        default lama tidak sahih. R-multiple tetap sahih karena
+        skala-invariant, tetapi metrik berbasis equity tidak.
+        """
+        if initial_equity is None:
+            initial_equity = float(self.risk.get("simulated_equity_idr", 3_700_000))
         equity = initial_equity
         peak = equity
         trades: list[Trade] = []
