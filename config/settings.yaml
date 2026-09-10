@@ -146,15 +146,18 @@ data:
     H1: 31000                 # ~5 tahun
     H4: 15000                 # ~9 tahun
 
-# Sesi trading - waktu server = WIB (UTC+7), terverifikasi
-# Spread fixed, jadi pemilihan sesi berdasar VOLATILITAS bukan biaya
-sessions:
-  timezone_note: "server = WIB = UTC+7 (selisih 0 jam, terverifikasi)"
-  asia:            {start: "06:00", end: "14:00", trade: false}
-  london_open:     {start: "14:00", end: "17:00", trade: true}
-  london_ny:       {start: "19:30", end: "23:00", trade: true}
-  ny_afternoon:    {start: "23:00", end: "04:00", trade: false}
-  friday_cutoff:   "21:00"    # tidak ada entry baru setelah ini
+# CATATAN: blok `sessions:` yang lama DIHAPUS 10 Sep 2026.
+#
+# Blok itu tidak pernah dibaca kode manapun (diverifikasi grep di src/ dan
+# backtest/) - jam trading sesungguhnya diatur di src/strategy/sessions.py
+# konstanta SESSIONS. Isinya juga sudah usang: menyebut server UTC+7
+# padahal sudah dikoreksi ke UTC+0.
+#
+# Membiarkannya berbahaya: pembaca config wajar mengira jam trading diatur
+# di sini, lalu mengubahnya dan heran kenapa tidak ada efeknya.
+#
+# Untuk membatasi sesi tanpa menyentuh kode, pakai `momentum_sessions`
+# (daftar nama sesi) - dibaca RuleEngine. Kosong/tidak ada = semua sesi.
 
 # EXECUTOR = bot mengirim order sungguhan.
 #
