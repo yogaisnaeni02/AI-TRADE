@@ -224,17 +224,17 @@ setiap angka keputusan — belum punya tes sama sekali.
 
 **Jangan ubah apa pun di jalur sinyal sampai tahap ini selesai.**
 
-Target: ~200 trade (≈5 bulan pada 510 trade/tahun). Evaluasi di 50, 100,
+Target: ~200 trade (≈4 bulan pada 635 trade/tahun). Evaluasi di 50, 100,
 dan 200 trade.
 
 Acuan pembanding:
 
 | Metrik | Backtest | Ambang bahaya |
 |---|---|---|
-| E[R] | +0,1557R | negatif di n ≥ 100 |
-| Winrate | 31,1% | di bawah 28,17% (breakeven) |
-| Trade/hari kalender | 1,40 | jauh lebih kecil = ada yang salah |
-| Profit factor | 1,28 | di bawah 1,0 |
+| E[R] | +0,1254R | negatif di n ≥ 100 |
+| Winrate | 29,9% | di bawah 28,17% (breakeven) |
+| Trade/hari kalender | 1,74 | jauh lebih kecil = ada yang salah |
+| Profit factor | 1,22 | di bawah 1,0 |
 
 **Aturan yang ditetapkan SEKARANG, sebelum ada uang di meja:**
 

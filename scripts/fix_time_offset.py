@@ -47,8 +47,30 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# Hanya data/ yang bergeser. data_corr/ sudah benar - jangan disentuh.
-TARGET_GLOBS = ["data/raw/*.parquet", "data/processed/*.parquet"]
+# HANYA data/raw. data_corr/ sudah benar - jangan disentuh.
+#
+# data/processed SENGAJA TIDAK ADA DI SINI (diperbaiki 10 Sep 2026).
+#
+# Skrip ini hanya menggeser kolom `time_utc`. File di data/processed juga
+# menyimpan kolom TURUNAN waktu - session, session_date, is_trading_session,
+# hour_utc, dayofweek, friday_cutoff, asia_high/low, sweep_* - dan kolom itu
+# TIDAK ikut tergeser. Hasilnya file dengan time_utc benar tetapi label sesi
+# masih salah 7 jam: jauh lebih berbahaya daripada file yang jelas-jelas
+# salah, karena semuanya tampak konsisten padahal tidak.
+#
+# Itu benar-benar terjadi: backtest memblokir 7 jam penuh (termasuk seluruh
+# sesi London) karena label basi, sementara bot live menghitung sesi dengan
+# benar - backtest dan live menguji jam yang berbeda lagi.
+#
+# Cara yang benar untuk data/processed: BANGUN ULANG dari raw.
+#     python -m src.features.pipeline
+TARGET_GLOBS = ["data/raw/*.parquet"]
+
+# Kehadiran kolom-kolom ini menandakan file harus DIBANGUN ULANG, bukan digeser.
+DERIVED_TIME_COLUMNS = [
+    "session", "session_date", "is_trading_session", "hour_utc",
+    "dayofweek", "friday_cutoff", "asia_high", "asia_low",
+]
 
 OFFSET_HOURS = 7
 
@@ -160,7 +182,55 @@ def main() -> int:
 
     verb = "akan diperbaiki" if args.check else "diperbaiki"
     print(f"\n{changed} {verb}, {skipped} dilewati, {failed} gagal")
+
+    stale = check_processed_stale()
+    if stale:
+        print()
+        print("!! FILE TURUNAN HARUS DIBANGUN ULANG")
+        for rel, reason in stale:
+            print(f"   {rel} - {reason}")
+        print()
+        print("   data/processed sengaja tidak disentuh skrip ini: file di")
+        print("   sana menyimpan kolom turunan waktu yang tidak ikut tergeser.")
+        print("   Jalankan:  python -m src.features.pipeline")
+        print()
+        return 1
+
     return 1 if failed else 0
+
+
+def check_processed_stale() -> list:
+    """
+    Laporkan file data/processed yang label sesinya tidak cocok dengan
+    kolom time_utc-nya.
+
+    Dibandingkan langsung, bukan lewat mtime: sebuah file bisa lebih baru
+    dari raw tetapi tetap membawa label yang dihitung pada waktu lama.
+    """
+    out = []
+    try:
+        sys.path.insert(0, str(ROOT))
+        from src.strategy.sessions import classify_session
+    except Exception:  # noqa: BLE001
+        return out
+
+    for path in sorted(ROOT.glob("data/processed/*.parquet")):
+        try:
+            df = pd.read_parquet(path)
+        except Exception:  # noqa: BLE001
+            continue
+        if "time_utc" not in df.columns:
+            continue
+        rel = str(path.relative_to(ROOT))
+        if "session" in df.columns:
+            match = (classify_session(pd.to_datetime(df["time_utc"])) == df["session"]).mean()
+            if match < 0.999:
+                out.append((rel, f"label sesi cocok hanya {match * 100:.1f}% dengan time_utc"))
+        else:
+            present = [c for c in DERIVED_TIME_COLUMNS if c in df.columns]
+            if present:
+                out.append((rel, f"kolom turunan tanpa session: {', '.join(present)}"))
+    return out
 
 
 if __name__ == "__main__":

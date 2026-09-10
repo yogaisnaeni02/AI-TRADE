@@ -20,6 +20,31 @@ pengukuran pertama yang dilakukan pada data berlabel waktu yang benar.
 | `per_trade.max_risk_percent` | **1,35** | 1,0 (tidak pernah berlaku) |
 | `max_bars_hold` backtest | **48** (ikut config) | 120 (hardcode) |
 
+> **KOREKSI (revisi 3, 10 Sep 2026):** `scripts/fix_time_offset.py` hanya
+> menggeser kolom `time_utc`, TIDAK menghitung ulang kolom turunannya. File
+> di `data/processed` karena itu punya `time_utc` benar tetapi `session`,
+> `is_trading_session`, `hour_utc`, `friday_cutoff`, `asia_high/low`, dan
+> `sweep_*` masih nilai lama yang salah 7 jam (terverifikasi: label tersimpan
+> cocok 100% dengan `time_utc` dikurangi 7 jam). Akibatnya backtest memblokir
+> 7 jam penuh termasuk seluruh sesi London, sementara bot live menghitung
+> sesi dengan benar — backtest dan live menguji jam berbeda lagi.
+>
+> Setelah `python -m src.features.pipeline` dijalankan ulang, terungkap bahwa
+> `is_trading_session` (dari daftar SESSIONS hardcode) memblokir `asia` dan
+> `pre_ny`, dan justru jam-jam itulah yang menguntungkan:
+>
+> | | n | E[R] | t | DD |
+> |---|---|---|---|---|
+> | patuhi `is_trading_session` | 457 | **−0,1254** | −1,65 | 89% |
+> | 24 jam penuh | **897** | **+0,1254** | **+2,14** | 32,1% |
+>
+> `momentum_fib.require_trading_session: false` ditambahkan ke config.
+> **Angka final yang berlaku: E[R] +0,1254, t 2,14, WR 29,9%, PF 1,22,
+> DD 32,1%, 635 trade/tahun, stabil di kedua paruh (+0,108 / +0,143).**
+> Angka di seluruh sisa dokumen ini dan di `docs/30` diukur sebelum rebuild
+> dan harus dibaca dengan itu di pikiran; arah kesimpulannya tidak berubah,
+> besarannya berubah.
+>
 > **KOREKSI (revisi 2, 10 Sep 2026 malam):** angka di revisi pertama dokumen
 > ini diukur dengan `global.max_drawdown_percent: 20` AKTIF di dalam backtest.
 > Engine menghentikan simulasi begitu drawdown 20% tersentuh — pada

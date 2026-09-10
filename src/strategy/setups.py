@@ -102,6 +102,24 @@ class RuleEngine:
         self.atr_lo = float(mf.get("atr_percentile_min", 0.20))
         self.atr_hi = float(mf.get("atr_percentile_max", 0.95))
 
+        # Patuhi kolom `is_trading_session` atau tidak. MATI default.
+        #
+        # Jaring pengaman, bukan pengubah perilaku: sejak sessions.py
+        # dikoreksi (10 Sep 2026) SEMUA sesi bertanda trade=True, sehingga
+        # kolom itu selalu True dan flag ini tidak berpengaruh apa pun.
+        #
+        # Tetap ada karena penandaan trade=False pernah membuat backtest
+        # memblokir 7 jam penuh tanpa disadari. Diukur pada daftar SESSIONS
+        # yang lama (asia & pre_ny = False), efeknya besar:
+        #   patuhi is_trading_session : n=457  E[R]=-0,1254  t=-1,65  DD 89%
+        #   abaikan (24 jam penuh)    : n=897  E[R]=+0,1254  t=+2,14  DD 32%
+        #
+        # Jadi bila suatu saat ada sesi ditandai trade=False lagi, flag ini
+        # membuat keputusannya eksplisit di config, bukan tersembunyi di
+        # daftar hardcode.
+        self.require_trading_session = bool(mf.get("require_trading_session", False))
+
+
         # Filter konfluensi (candle searah + ADX + tren M5). MATI default.
         #
         # Kandidat terkuat di proyek ini. Diukur dengan halt DD dimatikan
@@ -662,7 +680,9 @@ class RuleEngine:
         run_frequent_micro = "frequent_micro" in self.active_setups
 
         for row in df.itertuples():
-            ok_strict, _ = self._passes_gates(row, require_session=True)
+            ok_strict, _ = self._passes_gates(
+                row, require_session=self.require_trading_session
+            )
 
             if ok_strict and strict_detectors:
                 candidates = [
