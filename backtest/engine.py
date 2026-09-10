@@ -100,6 +100,28 @@ class Backtester:
         pm = self.cfg.get("position_management", {})
         self.max_bars_hold = pm.get("max_bars_hold", 48)
 
+        # Trailing dibaca dari config yang SAMA dengan bot live.
+        #
+        # BUG YANG DIPERBAIKI (10 Sep 2026): run() punya default
+        # breakeven_at_r=None dan trail_atr_mult=None, sehingga setiap
+        # pemanggilan yang tidak mengoper argumen itu mensimulasikan sistem
+        # TANPA trailing - sementara bot live selalu memakainya dari config.
+        # Divergensi backtest-live kelima dengan pola yang sama persis:
+        # nilai ada di config, tetapi run() tidak mengambilnya sendiri.
+        #
+        # Selisihnya kecil (E[R] +0,0764 tanpa vs +0,0726 dengan) karena
+        # trailing praktis tidak pernah kena - breakeven_at_r 2,4 sementara
+        # TP di 2,78R menyisakan jendela cuma 0,38R. Tetapi polanya yang
+        # berbahaya, bukan besarannya.
+        self.breakeven_at_r = pm.get("breakeven_at_r")
+        self.trail_atr_mult = pm.get("trail_atr_mult")
+
+        # Jumlah posisi bersamaan, dari config. Sebelumnya hardcode 1 dan
+        # nilai config diabaikan sepenuhnya.
+        self.max_open_positions = int(
+            self.risk.get("global", {}).get("max_open_positions", 1)
+        )
+
         self.risk_pct = self.risk["per_trade"]["max_risk_percent"]
         self.max_daily_loss = self.risk["daily"]["max_loss_percent"]
         self.max_daily_trades = self.risk["daily"]["max_trades"]
@@ -318,6 +340,10 @@ class Backtester:
         """
         if initial_equity is None:
             initial_equity = float(self.risk.get("simulated_equity_idr", 3_700_000))
+        if breakeven_at_r is None:
+            breakeven_at_r = self.breakeven_at_r
+        if trail_atr_mult is None:
+            trail_atr_mult = self.trail_atr_mult
         equity = initial_equity
         peak = equity
         trades: list[Trade] = []
@@ -325,7 +351,15 @@ class Backtester:
 
         day_pnl, day_trades, consec_losses = 0.0, 0, 0
         current_day = None
-        busy_until_idx = -1
+        # Slot posisi. Panjangnya = max_open_positions; tiap elemen
+        # menyimpan idx bar saat slot itu bebas kembali.
+        #
+        # DIPERBAIKI 10 Sep 2026: sebelumnya satu skalar busy_until_idx,
+        # sehingga engine SELALU mensimulasikan 1 posisi dan mengabaikan
+        # risk.global.max_open_positions. Saat config dinaikkan ke 2 untuk
+        # eksperimen dua arah, backtest menunjukkan sell menggeser buy
+        # (845 -> 735) padahal di live keduanya berjalan berdampingan.
+        slots = [-1] * max(1, self.max_open_positions)
         halted = False
 
         for _, sig in signals.iterrows():
@@ -336,8 +370,10 @@ class Backtester:
             if day != current_day:
                 current_day, day_pnl, day_trades, consec_losses = day, 0.0, 0, 0
 
-            # Satu posisi pada satu waktu
-            if int(sig["idx"]) <= busy_until_idx:
+            # Cari slot posisi yang sudah bebas di bar ini.
+            idx_now = int(sig["idx"])
+            free = next((z for z, until in enumerate(slots) if idx_now > until), None)
+            if free is None:
                 continue
             if day_trades >= self.max_daily_trades:
                 continue
@@ -362,7 +398,7 @@ class Backtester:
             day_trades += 1
             consec_losses = consec_losses + 1 if trade.pnl_idr < 0 else 0
 
-            busy_until_idx = int(sig["idx"]) + trade.bars_held + 1
+            slots[free] = idx_now + trade.bars_held + 1
             trades.append(trade)
             curve.append(
                 {"time": trade.exit_time, "equity": equity, "drawdown_pct": dd}

@@ -28,6 +28,7 @@ import pandas as pd
 from ..data.mt5_gateway import MT5Gateway, detect_server_offset_hours, load_config
 from ..features.indicators import add_all, add_extended
 from ..features.pipeline import build_htf_context
+from ..config_fingerprint import describe as cfg_describe, fingerprint as cfg_fingerprint
 from ..risk.manager import RiskManager
 from ..strategy import sessions, structure
 from ..monitoring import notifier
@@ -85,6 +86,11 @@ class TradingBot:
         # run_bot.py --allow-real; default False supaya akun real tidak
         # pernah tersentuh karena kelalaian.
         self.allow_real = False
+
+        # Sidik jari konfigurasi sinyal, ditempelkan ke comment tiap order
+        # agar forward test bisa dipisahkan per setelan. Lihat
+        # src/config_fingerprint.py.
+        self.cfg_hash = cfg_fingerprint(self.cfg, self.risk.risk, self.min_score)
 
         self._last_bar_time: Optional[pd.Timestamp] = None
         self._halt_notified = False
@@ -394,7 +400,7 @@ class TradingBot:
             lot=decision.lot,
             sl=sig["sl"],
             tp=sig["tp"],
-            comment=f"{sig['setup']}_{sig['score']}",
+            comment=f"{sig['setup']}_{sig['score']}_{self.cfg_hash}",
         )
 
         notifier.notify_order_result(result.success, result.ticket, result.price, result.comment)
@@ -499,6 +505,7 @@ class TradingBot:
         self.log(f"Akun {acc.login} @ {acc.server} ({'DEMO' if is_demo else 'REAL'})")
         self.log(f"Equity Rp {acc.equity:,.0f} | simbol {self.symbol}")
         self.log(f"Setup: {self.allowed_setups} skor {self.min_score}-{self.max_score}")
+        self.log(f"Konfigurasi sinyal: {cfg_describe(self.cfg, self.risk.risk, self.min_score)}")
         self.log("=" * 58)
 
         if self.mode == "EXECUTOR" and not is_demo:

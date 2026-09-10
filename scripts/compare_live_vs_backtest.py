@@ -41,10 +41,16 @@ TRADES_CSV = ROOT / "logs" / "trades.csv"
 # Acuan dari backtest M5 (docs/28-HASIL-KALIBRASI-ULANG.md bagian 1).
 # Periode PENUH tanpa halt DD (docs/28 revisi 2). Angka lama 0.1749/31.77/
 # 1.31/2.90 berasal dari backtest yang terpotong halt 20% pada Mar 2026.
-BT_EXPECTANCY = 0.1254
-BT_WINRATE = 29.9
-BT_PF = 1.22
-BT_TRADES_PER_DAY = 1.74   # per hari KALENDER (897 trade / 515 hari)
+# Pembanding SISI BUY, diukur dengan sell DIMATIKAN dan min_score=5.
+#
+# Alasannya: di live max_open_positions=2, sehingga buy tidak tergeser
+# oleh sell. Memakai angka campuran (+0,1214) akan salah - itu populasi
+# buy yang sudah terpotong sell di backtest yang hardcode 1 posisi.
+# Lihat catatan di backtest/engine.py::run.
+BT_EXPECTANCY = 0.1092
+BT_WINRATE = 29.7
+BT_PF = 1.20
+BT_TRADES_PER_DAY = 1.64   # per hari KALENDER (845 trade / 515 hari)
 BREAKEVEN_WR = 28.17   # RR 1:2,78 setelah spread 260 points
 
 # Komentar yang menandai trade uji manual, bukan hasil strategi.
@@ -65,6 +71,13 @@ def load_trades() -> list[dict]:
                 row["_net"] = float(row["net_idr"])
                 row["_r"] = float(row["r_multiple"]) if row.get("r_multiple") else None
                 row["_entry"] = datetime.fromisoformat(row["entry_time"])
+                row["_dir"] = (row.get("direction") or "?").lower()
+                # comment berformat "<setup>_<skor>_<cfghash>"; bagian
+                # terakhir adalah sidik jari konfigurasi sinyal saat order
+                # dibuka. Trade dari sidik jari berbeda TIDAK boleh
+                # digabungkan - lihat src/config_fingerprint.py.
+                parts = (row.get("comment") or "").rsplit("_", 1)
+                row["_cfg"] = parts[1] if len(parts) == 2 and len(parts[1]) == 4 else "lama"
             except (ValueError, KeyError):
                 continue
             rows.append(row)
@@ -143,6 +156,14 @@ def verdict(s: dict) -> list[str]:
     return out
 
 
+def by_group(rows: list) -> dict:
+    """Kelompokkan per (sidik jari config, arah)."""
+    out = {}
+    for r in rows:
+        out.setdefault((r["_cfg"], r["_dir"]), []).append(r)
+    return out
+
+
 def main() -> int:
     rows = load_trades()
     if not rows:
@@ -182,15 +203,47 @@ def main() -> int:
     if "expectancy" in s:
         print(f"\nCI 95% E[R] live : [{s['ci_lo']:+.4f} ; {s['ci_hi']:+.4f}]   t = {s['t']:.2f}")
         if s["ci_lo"] <= BT_EXPECTANCY <= s["ci_hi"]:
-            print("Backtest (+0,1254R) BERADA di dalam CI live - konsisten.")
+            print("Backtest buy (+0,1092R) BERADA di dalam CI live - konsisten.")
         else:
-            print("Backtest (+0,1254R) DI LUAR CI live - hasil live menyimpang.")
+            print("Backtest buy (+0,1092R) DI LUAR CI live - hasil live menyimpang.")
 
     print(f"\nBreakeven winrate RR 1:2,78 = {BREAKEVEN_WR}%")
     print("\nVONIS")
     for line in verdict(s):
         print(f"  {line}")
 
+    # Pecah per konfigurasi dan arah.
+    #
+    # Sejak eksperimen dua arah di demo (10 Sep 2026), trades.csv bisa
+    # memuat buy DAN sell, dan bisa memuat lebih dari satu setelan bila
+    # config sempat berubah. Merata-ratakan semuanya menghasilkan angka
+    # yang tidak berarti apa-apa.
+    groups = by_group(rows)
+    if len(groups) > 1:
+        print()
+        print("=" * 70)
+        print("PECAHAN PER KONFIGURASI DAN ARAH")
+        print("=" * 70)
+        print("Trade dari sidik jari config berbeda TIDAK dibandingkan satu")
+        print("sama lain - jalur sinyalnya memang berbeda.")
+        print()
+        hdr2 = f"{'cfg':>6s} {'arah':>5s} {'n':>5s} {'E[R]':>9s} {'t':>6s} {'WR%':>6s} {'P/L':>14s}"
+        print(hdr2)
+        print("-" * len(hdr2))
+        for (cfg, direction), g in sorted(groups.items()):
+            st = stats(g)
+            e = st.get("expectancy")
+            es = f"{e:>+9.4f}" if e is not None else "        -"
+            ts = f"{st['t']:>6.2f}" if st.get("t") is not None else "     -"
+            print(f"{cfg:>6s} {direction:>5s} {st['n']:>5d} {es} {ts} "
+                  f"{st['winrate']:>6.2f} {'Rp ' + format(st['total_pnl'], ',.0f'):>14s}")
+        print("-" * len(hdr2))
+        print()
+        print("CATATAN: hanya kelompok BUY pada sidik jari terbaru yang")
+        print("dihitung terhadap ambang docs/29 bagian 9. Sisi SELL adalah")
+        print("eksperimen demo dengan ekspektasi awal NEGATIF dan punya")
+        print("gerbangnya sendiri sebelum boleh ikut ke akun real.")
+        print()
     print("\nAmbang lengkap: docs/29-RENCANA-LANJUTAN.md bagian 9")
     return 0
 

@@ -93,7 +93,25 @@ weekly:
 
 global:
   max_drawdown_percent: 20.0  # MATIKAN SISTEM - butuh reset manual
-  max_open_positions: 1       # jangan pernah dinaikkan
+  # DINAIKKAN 1 -> 2 (10 Sep 2026) khusus eksperimen demo dua arah.
+  #
+  # Alasan: dengan batas 1, posisi sell memblokir sinyal buy. Terukur di
+  # backtest: menyalakan sell menggeser 110 trade buy (845 -> 735), yang
+  # berarti forward test sisi buy ikut terkontaminasi.
+  #
+  # PERHATIAN: backtest/engine.py HARDCODE 1 posisi dan tidak membaca nilai
+  # ini, jadi efek nilai 2 TIDAK bisa divalidasi lewat backtest - hanya
+  # berlaku di live. Arah selisihnya aman (backtest lebih ketat), tetapi
+  # pembanding forward test sisi buy harus memakai angka "sell mati"
+  # (n=845, E[R] +0,1092), bukan angka campuran.
+  #
+  # Nilai 2 = satu posisi per arah, sehingga kedua sisi dikumpulkan
+  # sendiri-sendiri tanpa saling mengambil jatah.
+  #
+  # KONSEKUENSI: eksposur maksimum menjadi 2x (Rp ~140.000 = 2,7% equity).
+  # Itu diterima di demo. KEMBALIKAN KE 1 sebelum akun real, kecuali sisi
+  # sell sudah lolos gerbangnya sendiri.
+  max_open_positions: 2
 
 # Position sizing adaptif - lot lebih besar saat keyakinan sinyal tinggi.
 #

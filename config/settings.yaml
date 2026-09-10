@@ -136,6 +136,24 @@ momentum_fib:
   # 24 jam penuh, sesuai keputusan pemilik.
   require_trading_session: false
 
+  # Izinkan sisi SELL. EKSPERIMEN DEMO - jangan bawa ke akun real.
+  #
+  # Backtest konsisten mengatakan sisi sell tidak punya edge (empat definisi
+  # rezim diuji, semuanya memperburuk; lihat docs/43). Dinyalakan di sini
+  # HANYA karena tiga hal bertemu:
+  #   1. akun demo - salah tidak berbiaya
+  #   2. pengamatan manual pemilik bertentangan dengan backtest
+  #   3. rezim turun sekarang (14 hari -4,79%) adalah kondisi yang di
+  #      backtest hanya muncul di 1 dari 6 kuartal
+  #
+  # Tanpa ini, bot hanya mengambil 6,3% bar yang memenuhi arah buy dan
+  # membuang 28,2% bar sisi sell - forward test praktis mandek selama
+  # rezim turun berlangsung.
+  #
+  # WAJIB: analisis buy dan sell TERPISAH. Sell punya gerbangnya sendiri
+  # sebelum boleh ikut ke akun real (docs/29 bagian 9).
+  allow_sell: true
+
 active_setups:
   # momentum_fib dipilih sebagai kandidat forward test: satu-satunya
   # konfigurasi dari 11 yang diuji yang mencapai 4/5 fold walk-forward

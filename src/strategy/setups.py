@@ -119,6 +119,30 @@ class RuleEngine:
         # daftar hardcode.
         self.require_trading_session = bool(mf.get("require_trading_session", False))
 
+        # Izinkan sisi SELL. MATI default.
+        #
+        # EKSPERIMEN DEMO, bukan setelan yang diyakini menguntungkan.
+        # Backtest konsisten mengatakan sisi sell TIDAK punya edge:
+        #
+        #   varian                      n     E[R]      t   sisi sell   holdout
+        #   sell mati (baseline)      693  +0,1188   1,78          -   +0,1489
+        #   sell simetris            1170  +0,0539   1,07    -0,0379   -0,5333
+        #   sell + H4 downtrend       820  +0,0974   1,60    -0,0494   +0,0750
+        #   sell + H1&H4 downtrend    723  +0,0983   1,51    -0,3757   +0,1077
+        #
+        # Tiga definisi rezim diuji; tidak ada yang menyelamatkannya, dan
+        # baseline tetap terbaik di holdout tersegel.
+        #
+        # Dinyalakan HANYA di akun demo untuk satu alasan: backtest bilang
+        # negatif, pengamatan manual pemilik bilang sebaliknya, dan rezim
+        # turun saat ini (14 hari -4,79%, downtrend 71,7%) adalah kondisi
+        # yang di backtest hanya muncul di 1 dari 6 kuartal. Menguji di demo
+        # tidak berbiaya, dan jendela ini mungkin tidak terulang berbulan.
+        #
+        # JANGAN nyalakan di akun real sebelum sisi sell lolos gerbangnya
+        # sendiri (docs/29 bagian 9). Analisis buy dan sell WAJIB terpisah.
+        self.allow_sell = bool(mf.get("allow_sell", False))
+
 
         # Filter konfluensi (candle searah + ADX + tren M5). MATI default.
         #
@@ -448,18 +472,30 @@ class RuleEngine:
         # KONSEKUENSI: bukti sistem ini bias ke rezim emas NAIK (data Apr
         # 2025 - Sep 2026, $3.200 -> $4.400). Di bear market panjang sistem
         # akan jarang memberi sinyal. Lihat docs/39.
-        if row.mom_24 > row.mom_24_q85:
-            size_tier = "full"
-        elif row.mom_24 > row.mom_24_q85 * 0.5:
-            size_tier = "reduced"
-        else:
-            return None
-
-        # Arah ditentukan tren HTF; sisi bawah range untuk sell
+        # Arah ditentukan DULU, baru momentum diuji dengan tanda yang sesuai.
+        #
+        # Urutan ini dibalik 10 Sep 2026 agar sisi sell bisa diaktifkan.
+        # Sebelumnya momentum diuji sebelum arah diketahui, sehingga sell
+        # menuntut "harga sedang NAIK kuat" padahal trend_htf wajib
+        # downtrend - dua syarat yang saling meniadakan.
+        #
+        # Perilaku BUY tidak berubah sama sekali: untuk buy, mom_arah =
+        # +mom_24, identik dengan gate lama.
         if row.trend_htf == "uptrend" and row.fib_position > 0.75:
             direction = "buy"
         elif row.trend_htf == "downtrend" and row.fib_position < 0.25:
+            if not self.allow_sell:
+                return None
             direction = "sell"
+        else:
+            return None
+
+        # Momentum bertanda: naik kuat untuk buy, turun kuat untuk sell.
+        mom_arah = row.mom_24 if direction == "buy" else -row.mom_24
+        if mom_arah > row.mom_24_q85:
+            size_tier = "full"
+        elif mom_arah > row.mom_24_q85 * 0.5:
+            size_tier = "reduced"
         else:
             return None
 
@@ -647,7 +683,14 @@ class RuleEngine:
 
     # -- generator utama -------------------------------------------------
 
-    def generate(self, df: pd.DataFrame, min_score: int = 7) -> pd.DataFrame:
+    def generate(self, df: pd.DataFrame, min_score: int = 5) -> pd.DataFrame:
+        # default 7 -> 5 (10 Sep 2026) agar SAMA dengan TradingBot.
+        #
+        # Sebelumnya berbeda: bot memakai 5, default signature ini 7.
+        # Siapa pun yang memanggil generate(df) tanpa argumen mengukur
+        # sistem yang bukan yang berjalan live - dan itu terjadi: seluruh
+        # angka docs/36 & docs/38 diukur pada min_score=7. Divergensi
+        # backtest-live ketiga setelah max_bars dan label sesi. docs/38 §9.
         """
         Hasilkan sinyal untuk seluruh dataframe.
 
