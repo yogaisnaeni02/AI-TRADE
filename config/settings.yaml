@@ -121,6 +121,21 @@ momentum_fib:
   atr_percentile_min: 0.20
   atr_percentile_max: 0.95
 
+  # Patuhi kolom `is_trading_session` atau tidak.
+  #
+  # Kolom itu berasal dari daftar SESSIONS hardcode di sessions.py, yang
+  # menandai `asia` (23-07 UTC) dan `pre_ny` (10-12 UTC) sebagai
+  # trade=false. Penandaan itu warisan kalibrasi lama yang dilakukan pada
+  # data berlabel waktu SALAH 7 jam, sehingga tidak punya dasar lagi.
+  #
+  # Diukur ulang pada data yang sudah benar (10 Sep 2026, 1,41 tahun):
+  #   true  (patuhi) : n=457  E[R]=-0,1254  t=-1,65  DD 89%  <- RUGI
+  #   false (24 jam) : n=897  E[R]=+0,1254  t=+2,14  DD 32%
+  #
+  # Jam yang diblokir daftar lama justru yang menguntungkan. false =
+  # 24 jam penuh, sesuai keputusan pemilik.
+  require_trading_session: false
+
 active_setups:
   # momentum_fib dipilih sebagai kandidat forward test: satu-satunya
   # konfigurasi dari 11 yang diuji yang mencapai 4/5 fold walk-forward

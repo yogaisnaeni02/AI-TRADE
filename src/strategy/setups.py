@@ -102,6 +102,22 @@ class RuleEngine:
         self.atr_lo = float(mf.get("atr_percentile_min", 0.20))
         self.atr_hi = float(mf.get("atr_percentile_max", 0.95))
 
+        # Patuhi `is_trading_session` atau tidak.
+        #
+        # Kolom itu berasal dari daftar SESSIONS hardcode di sessions.py,
+        # yang menandai `asia` dan `pre_ny` sebagai trade=False. Penandaan
+        # itu warisan kalibrasi lama yang dilakukan pada data berlabel
+        # waktu SALAH 7 jam, jadi tidak punya dasar lagi.
+        #
+        # Diukur pada data yang sudah benar (10 Sep 2026, 1,41 thn):
+        #   patuhi is_trading_session : n=457  E[R]=-0,1254  t=-1,65  DD 89%
+        #   24 jam penuh              : n=897  E[R]=+0,1254  t=+2,14  DD 32%
+        #
+        # Jam yang diblokir daftar lama (Tokyo 23-07 UTC dan pre-NY 10-12)
+        # justru yang menguntungkan; jam London/NY "resmi" yang rugi.
+        # Default false = 24 jam, sesuai keputusan pemilik.
+        self.require_trading_session = bool(mf.get("require_trading_session", False))
+
     # -- helper ----------------------------------------------------------
 
     def _price_to_points(self, price_diff: float) -> float:
@@ -568,7 +584,9 @@ class RuleEngine:
         run_frequent_micro = "frequent_micro" in self.active_setups
 
         for row in df.itertuples():
-            ok_strict, _ = self._passes_gates(row, require_session=True)
+            ok_strict, _ = self._passes_gates(
+                row, require_session=self.require_trading_session
+            )
 
             if ok_strict and strict_detectors:
                 candidates = [
