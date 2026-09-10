@@ -112,7 +112,9 @@ def add_structure(
     confirmed: list[SwingPoint] = []
     swing_ptr = 0
     cur_trend = "ranging"
-    prev_trend = "ranging"
+    # Tren BERARAH terakhir (uptrend/downtrend), mengabaikan periode ranging
+    # di antaranya. Dipakai deteksi CHoCH - lihat catatan di bawah.
+    last_directional: str | None = None
 
     for i in range(n):
         while swing_ptr < len(swings) and swings[swing_ptr].confirmed_at_idx <= i:
@@ -127,7 +129,6 @@ def add_structure(
         if lows:
             last_sl[i] = lows[-1].price
 
-        prev_trend = cur_trend
         cur_trend = classify_trend(confirmed, lookback)
         trend[i] = cur_trend
 
@@ -139,10 +140,41 @@ def add_structure(
             bos[i] = -1
 
         # CHoCH: pergantian karakter tren — sinyal awal pembalikan
-        if prev_trend == "downtrend" and cur_trend == "uptrend":
-            choch[i] = 1
-        elif prev_trend == "uptrend" and cur_trend == "downtrend":
-            choch[i] = -1
+        #
+        # DIPERBAIKI 10 Sep 2026 — versi lama KODE MATI, tidak pernah menyala
+        # sekali pun dalam 100.000 bar.
+        #
+        # Versi lama membandingkan tren bar ini dengan tren bar SEBELUMNYA,
+        # dan menuntut lompatan LANGSUNG uptrend <-> downtrend. Padahal
+        # classify_trend selalu melewati "ranging" di antaranya:
+        #
+        #     downtrend -> ranging    3.411x
+        #     ranging   -> uptrend    3.667x
+        #     uptrend   -> downtrend      0x   <- yang dicari kode lama
+        #     downtrend -> uptrend        0x   <- yang dicari kode lama
+        #
+        # Akibatnya `choch` selalu 0 dan `bars_since_choch` selalu -1, dan
+        # bonus skor "CHoCH konfirmasi" di setups.py::_london_sweep tidak
+        # pernah diberikan. Tidak berdampak pada sistem yang berjalan
+        # (london_sweep nonaktif, momentum_fib tidak memakai CHoCH), tetapi
+        # kolom yang selalu nol adalah jebakan untuk pengembangan berikutnya.
+        #
+        # Perbaikan: bandingkan dengan tren BERARAH TERAKHIR, bukan tren bar
+        # sebelumnya - sehingga perjalanan lewat "ranging" tetap terhitung
+        # sebagai pergantian karakter. Setelah diperbaiki: menyala 4.230x.
+        #
+        # CATATAN PEMAKAIAN: diuji sebagai filter untuk momentum_fib dan
+        # HASILNYA NEGATIF (-0,135R, negatif di kedua paruh). CHoCH mencari
+        # PEMBALIKAN sementara momentum_fib mencari KELANJUTAN - bertentangan
+        # secara desain. Lihat docs/33-UJI-BOS-CHOCH.md.
+        if cur_trend == "uptrend":
+            if last_directional == "downtrend":
+                choch[i] = 1
+            last_directional = "uptrend"
+        elif cur_trend == "downtrend":
+            if last_directional == "uptrend":
+                choch[i] = -1
+            last_directional = "downtrend"
 
     out["last_swing_high"] = last_sh
     out["last_swing_low"] = last_sl

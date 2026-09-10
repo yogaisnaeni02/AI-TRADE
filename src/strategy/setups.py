@@ -102,6 +102,26 @@ class RuleEngine:
         self.atr_lo = float(mf.get("atr_percentile_min", 0.20))
         self.atr_hi = float(mf.get("atr_percentile_max", 0.95))
 
+        # Filter konfluensi (candle searah + ADX). MATI secara default.
+        #
+        # Kandidat terkuat yang pernah lolos uji holdout tersegel:
+        # di 30% data yang tidak pernah dipakai memilih, expectancy naik
+        # +0,026R -> +0,128R sambil menyisakan 71% trade. Perbaikan di
+        # holdout JUSTRU LEBIH BESAR daripada di periode seleksi (+0,102R
+        # vs +0,053R) - kebalikan dari pola overfitting.
+        #
+        # Tetap dimatikan karena docs/29 melarang mengubah logika sinyal
+        # selama forward test berjalan, dan t=1,99 masih di bawah ambang
+        # Bonferroni 2,69 untuk 22 filter yang diuji.
+        #
+        # Cara mengaktifkan (SETELAH forward test selesai):
+        #     momentum_fib:
+        #       confluence_filter: true
+        #
+        # Pengukuran lengkap 22 filter: docs/32-UJI-GABUNGAN-TEKNIK.md
+        self.confluence_filter = bool(mf.get("confluence_filter", False))
+        self.confluence_adx_min = float(mf.get("confluence_adx_min", 25.0))
+
     # -- helper ----------------------------------------------------------
 
     def _price_to_points(self, price_diff: float) -> float:
@@ -381,6 +401,40 @@ class RuleEngine:
             direction = "sell"
         else:
             return None
+
+        # Filter konfluensi - hanya MEMBUANG sinyal, tidak pernah mengubah
+        # arah/SL/TP/lot. Sinyal yang lolos identik dengan tanpa filter.
+        #
+        # Dua syarat yang terbukti menyumbang sendiri-sendiri di holdout:
+        #   ADX > 25       -> tren cukup kuat (E +0,026 -> +0,105 sendirian)
+        #   candle searah  -> bar sinyal searah arah entry (-> +0,052)
+        #   keduanya       -> +0,128
+        #
+        # MACD dan Stochastic sengaja TIDAK dipakai: keduanya MEMPERBURUK
+        # hasil (-0,040R dan -0,065R). MACD mengulang informasi momentum(24)
+        # yang sudah dipakai setup ini, hanya lebih terlambat.
+        if self.confluence_filter:
+            adx = getattr(row, "adx", None)
+            if adx is None or pd.isna(adx) or adx <= self.confluence_adx_min:
+                return None
+
+            bull_candle = row.close > row.open
+            if (direction == "buy") != bull_candle:
+                return None
+
+            # Tren struktur M5 tidak boleh MELAWAN arah entry. Sengaja
+            # longgar - "ranging" tetap diterima, hanya arah berlawanan yang
+            # ditolak. Membuang 3,4% trade, menaikkan E di kedua periode
+            # (seleksi +0,143 -> +0,163, holdout +0,128 -> +0,155).
+            #
+            # BOS dan CHoCH sengaja TIDAK dipakai: keduanya memperburuk
+            # (-0,026R dan -0,135R). BOS mengulang momentum(24) lebih
+            # terlambat; CHoCH mencari pembalikan sementara setup ini mencari
+            # kelanjutan. Lihat docs/33-UJI-BOS-CHOCH.md.
+            trend_m5 = getattr(row, "trend", None)
+            opposite = "downtrend" if direction == "buy" else "uptrend"
+            if trend_m5 == opposite:
+                return None
 
         score = 5 if size_tier == "full" else 3
         reasons = [
