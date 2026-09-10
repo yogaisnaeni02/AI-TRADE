@@ -265,3 +265,94 @@ angka absolut baseline yang dipilih.
 Blocker ini **selesai**: bukan ketidakcocokan data, melainkan dua cara
 mengukur yang berbeda. Standar yang dipakai ke depan: **hanya halt DD yang
 dimatikan**, sesuai alasan di bagian 2.
+
+---
+
+## 9. Penutup Rekonsiliasi: Penyebab n=897 Ditemukan (10 Sep 2026, malam)
+
+Bagian 8 menutup blocker dengan dugaan *"kemungkinan besar diukur sebelum
+rebuild, atau dengan `min_score` berbeda"*. Dugaan kedua benar, dan sekarang
+terbukti persis.
+
+### Penyebabnya `min_score`
+
+Diukur pada file fitur yang sama pasca-merge, metode sama (hanya halt DD
+dimatikan, batas harian tetap aktif):
+
+| `min_score` | sinyal | n | E[R] | t | keterangan |
+|---|---|---|---|---|---|
+| 3 | 7.621 | **897** | +0,1254 | 2,14 | angka yang tidak tereproduksi di bagian 8 |
+| **5** | 7.285 | **885** | +0,1300 | **2,20** | **yang dipakai bot live** |
+| 6 | — | 796 | +0,1501 | 2,39 | (diuji di bagian 8) |
+| **7** | 4.189 | **675** | +0,1327 | **1,95** | **dipakai `docs/36` & `docs/38`** |
+
+n=897 adalah `min_score=3`. Bagian 8 menguji `min_score=6` tetapi tidak 3,
+sehingga tidak ketemu.
+
+### Temuan yang lebih penting: `min_score` live ≠ `min_score` yang diukur
+
+- `RuleEngine.generate()` default signature-nya **`min_score=7`**
+- `TradingBot.__init__` memakai **`min_score=5`** (`bot.py:53`)
+
+Siapa pun yang memanggil `generate(df)` tanpa argumen mengukur sistem yang
+**berbeda dari yang berjalan live**. Seluruh angka `docs/36` dan `docs/38`
+diukur pada `min_score=7`.
+
+**Ini divergensi backtest↔live yang ketiga di proyek ini**, setelah
+`max_bars` (`docs/30` §0.1) dan label sesi (bagian 8). Polanya identik:
+nilai default di satu tempat, nilai berbeda di tempat lain, tidak ada yang
+mengikat keduanya.
+
+### Konsekuensi untuk t = 3,14
+
+| `min_score` | tanpa filter | dengan konfluensi |
+|---|---|---|
+| 7 | t 1,95 | **t 3,14** — lolos ambang |
+| **5 (live)** | t 2,20 | **t 2,42** — belum lolos |
+
+Angka 519 / +0,2510 / t 3,14 **direproduksi persis** di sesi ini, jadi
+sahih. Tetapi berlaku **hanya pada `min_score=7`**. Pada setelan yang
+benar-benar berjalan, filter memberi t = 2,42.
+
+Kesimpulan bagian 8 bahwa "selisih +0,1327 → +0,2510 sahih apa pun angka
+absolut baseline" tetap benar **sebagai perbandingan relatif** — dan
+holdout tersegel menguatkannya di kedua setelan:
+
+| | tanpa filter | dengan filter |
+|---|---|---|
+| holdout, `min_score` 5 | +0,1455 | **+0,2856** |
+| holdout, `min_score` 7 | +0,1022 | **+0,3218** |
+
+Filternya nyata. Yang belum pasti hanya seberapa kuat pada setelan live.
+
+### Temuan sampingan: skor TIDAK terbalik
+
+Larangan "jangan pakai confidence score untuk keputusan apa pun" di
+`docs/28` dan `docs/29` bersandar pada temuan lama bahwa skor terbalik
+(skor 6 = +0,361R, skor 8 = −0,219R). Temuan itu diukur pada data berlabel
+waktu salah 7 jam. Diukur ulang pada data yang sudah benar:
+
+| kelompok skor | penuh | belah-1 | belah-2 | holdout |
+|---|---|---|---|---|
+| 4–6 | +0,024 | +0,098 | −0,065 | **−0,019** |
+| **7–8** | **+0,247** | +0,121 | **+0,347** | **+0,323** |
+
+Skor tinggi **tidak pernah lebih buruk di potongan mana pun**. Larangan itu
+dasarnya gugur dan perlu ditinjau ulang.
+
+Catatan kejujuran: belah-1 selisihnya hanya +0,023. Arahnya konsisten,
+besarannya tidak — jadi ini membalik klaim lama, bukan menegakkan klaim baru.
+
+### Keputusan yang menunggu pemilik
+
+Menaikkan `min_score` bot 5 → 7 membuang skor 4–6 yang terukur lemah
+(+0,024) dan menyisakan 7–8 (+0,247). Konsekuensinya **forward test yang
+sedang berjalan harus dimulai ulang**, karena jalur sinyal berubah.
+
+- **Tetap 5** — data live tidak terkontaminasi, evaluasi tetap di n=200
+- **Pindah ke 7** — setelan lebih baik secara terukur, jam mulai dari nol
+
+Rekomendasi: tetap 5. Data live yang bersih lebih berharga daripada +0,1R
+di backtest yang sudah dipakai 50+ percobaan. Tapi apa pun pilihannya,
+**samakan default `generate()` dengan `min_score` bot** supaya divergensi
+ini tidak terulang.

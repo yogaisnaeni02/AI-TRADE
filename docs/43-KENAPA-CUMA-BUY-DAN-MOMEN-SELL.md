@@ -178,3 +178,90 @@ dua, ambang t ~3,0**. Dan tidak boleh diubah selama forward test berjalan
 Sistem ini bukan "cuma bisa buy" — ia **memilih hanya mengambil taruhan
 yang terbukti**. Sisi sell tetap ada di kode dan akan otomatis ikut aktif
 begitu deteksi rezim terbukti layak.
+
+---
+
+## 9. Pelengkap: Seberapa Besar Handicap Short Sebenarnya? (sesi lain)
+
+Bagian 1–8 menjawab *"apakah sell bekerja"*. Bagian ini menjawab pertanyaan
+yang berbeda: *"apakah short dirugikan secara struktural, atau hanya setup
+ini yang tidak cocok?"* — diukur dengan **entry acak**, tanpa setup sama
+sekali.
+
+### Arus dasar tiap arah
+
+Entry acak, RR 1:2,78, SL 4000 pts, maks 48 bar, spread + slippage dibayar,
+seed tetap (4.000 sampel per arah):
+
+| data | arah | E[R] | t | WR% |
+|---|---|---|---|---|
+| M5 (2025–2026, +37%) | buy | −0,0548 | −2,15 | 26,5 |
+| M5 | **sell** | **−0,0749** | −2,96 | 25,8 |
+| M15 (2022–2026, +140%) | buy | −0,0747 | −3,05 | 27,7 |
+| M15 | **sell** | **−0,1209** | −5,00 | 26,2 |
+
+Dua hal terbaca:
+
+1. **Entry acak rugi di KEDUA arah.** Itu spread 26 pip — tembok yang sama
+   tinggi untuk buy maupun sell. Musuh utamanya biaya transaksi, bukan arah.
+2. **Handicap short kecil:** selisih buy−sell hanya **+0,020R (M5)** sampai
+   **+0,046R (M15)**. Itu drift naik emas. Short tidak dihukum berat secara
+   struktural.
+
+### Setup diukur sebagai nilai tambah di atas acak
+
+Ini cara yang lebih adil menilai sisi sell — bukan "positif atau negatif",
+melainkan "apakah setup menambah sesuatu di atas lempar koin":
+
+| | acak | setup (gate simetris) | **nilai tambah** |
+|---|---|---|---|
+| M5 buy | −0,055 | +0,131 | **+0,186R** |
+| M5 sell | −0,075 | −0,038 | **+0,037R** |
+| M15 buy | −0,075 | +0,038 | +0,113R |
+| M15 sell | −0,121 | −0,158 | **−0,037R** |
+
+Di M5, sisi sell sebenarnya **menambah nilai** (+0,037R) — konsisten dengan
+temuan bagian 4 bahwa ia bekerja saat rezimnya cocok. Ia hanya tidak cukup
+untuk melewati tembok spread −0,075R.
+
+Di M15 justru **lebih buruk dari lempar koin** (−0,037R).
+
+### Angka target yang konkret
+
+Dari tabel di atas, sebuah setup sell harus memberi **≥ +0,075R (M5)** atau
+**≥ +0,121R (M15)** di atas entry acak hanya untuk mencapai breakeven —
+plus margin di atasnya agar layak dijalankan.
+
+Sebagai pembanding: setup buy yang sekarang memberi **+0,186R** di atas acak.
+Jadi targetnya bukan mustahil — tetapi butuh sesuatu yang sekelas itu,
+dirancang khusus untuk sisi turun.
+
+### Catatan atas uji lintas-tahun M15
+
+M15 memberi 4,2 tahun (3x M5), dengan gate simetris `min_score=5`:
+
+| tahun | pasar | buy E[R] | sell E[R] |
+|---|---|---|---|
+| 2022 | −1% | −0,2447 | −0,2168 |
+| 2023 | +13% | +0,0395 | +0,0065 |
+| 2024 | +27% | +0,0232 | −0,0878 |
+| 2025 | +65% | +0,0654 | −0,1174 |
+| 2026 | +2% | +0,1607 | −0,5539 |
+| **total** | +140% | +0,0379 (t 0,65) | **−0,1580 (t −2,52)** |
+
+Sekilas ini tampak membantah bagian 4 — sell rugi bahkan di 2022 yang
+"datar". Tetapi **datar ≠ turun**: setahun −1% bisa berisi naik dan turun
+yang saling meniadakan, dan setup kelanjutan-tren rugi di kedua fase itu.
+Bagian 4 mengukur satu kuartal yang benar-benar turun **−14,7%** — itu
+kondisi yang berbeda, dan di sana sell menang.
+
+Jadi kedua temuan konsisten: **sell butuh tren turun yang jelas dan
+berkelanjutan, bukan sekadar pasar yang tidak naik.** Itu justru
+mempersempit syarat deteksi rezim di bagian 7 — bukan "deteksi bukan-bull",
+melainkan "deteksi bear yang sedang berlangsung".
+
+Perhatikan juga kolom buy: **+0,0379 (t 0,65) di M15**, jauh di bawah M5
+(+0,131). Edge sisi buy pun menyusut pada data lebih panjang — konsisten
+dengan `docs/28` §3.2. Pertanyaan itu lebih mendesak daripada soal sell:
+bila edge buy sendiri artefak periode, menambah sell tidak menyelamatkan
+apa pun.
