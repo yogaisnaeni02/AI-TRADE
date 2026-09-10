@@ -10,6 +10,7 @@ Prinsip keselamatan:
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import Literal, Optional
 
@@ -118,18 +119,63 @@ class OrderManager:
                 f"ditolak: {result.retcode} {result.comment}", result.retcode,
             )
 
-        # Verifikasi posisi benar-benar ada, dan SL benar-benar terpasang
-        positions = mt5.positions_get(symbol=self.symbol)
-        if positions:
-            for p in positions:
-                if p.ticket == result.order or p.magic == MAGIC:
-                    if p.sl == 0.0:
-                        self.modify_position(p.ticket, sl, tp)
-                    break
+        # Verifikasi SL benar-benar terpasang, dan TUTUP DARURAT bila gagal.
+        #
+        # DIPERBAIKI 10 Sep 2026. Versi sebelumnya memanggil
+        # modify_position() lalu MEMBUANG nilai baliknya, sehingga posisi
+        # tanpa SL tetap dilaporkan "berhasil". Pada XAUUSD dengan leverage
+        # 2000, satu posisi tanpa SL bisa menghabiskan akun dalam satu
+        # pergerakan - kerugian kecil yang disengaja jauh lebih murah.
+        #
+        # positions_get() kosong juga diperlakukan sebagai KEGAGALAN, bukan
+        # sukses diam: kalau posisi tidak bisa diverifikasi, kita tidak tahu
+        # apakah SL-nya ada.
+        ok, why = self._ensure_stop_attached(result.order, sl, tp)
+        if not ok:
+            closed = self.close_position(result.order)
+            return OrderResult(
+                False, result.order, result.price, result.volume,
+                f"SL gagal dipasang ({why}) - posisi "
+                f"{'DITUTUP darurat' if closed.success else 'GAGAL DITUTUP, INTERVENSI MANUAL'}",
+                result.retcode,
+            )
 
         return OrderResult(
             True, result.order, result.price, result.volume, "berhasil", result.retcode
         )
+
+    def _ensure_stop_attached(
+        self, ticket: int, sl: float, tp: Optional[float], attempts: int = 3
+    ) -> tuple[bool, str]:
+        """
+        Pastikan posisi punya SL. Coba pasang ulang beberapa kali.
+
+        Mengembalikan (True, "") bila SL terpasang, atau (False, alasan)
+        bila setelah semua percobaan SL masih kosong / posisi tak terbaca.
+        """
+        last = "tidak diketahui"
+
+        for i in range(attempts):
+            if i:
+                time.sleep(0.5)
+
+            positions = mt5.positions_get(symbol=self.symbol) or []
+            pos = next(
+                (p for p in positions if p.ticket == ticket or p.magic == MAGIC),
+                None,
+            )
+            if pos is None:
+                last = "posisi tidak terbaca dari broker"
+                continue
+
+            if pos.sl != 0.0:
+                return True, ""
+
+            last = "SL masih 0.0 setelah order"
+            if not self.modify_position(pos.ticket, sl, tp):
+                last = "modify_position ditolak broker"
+
+        return False, last
 
     def modify_position(self, ticket: int, sl: float, tp: Optional[float] = None) -> bool:
         """Ubah SL/TP. Menolak perubahan yang MELEBARKAN SL."""

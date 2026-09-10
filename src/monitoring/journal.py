@@ -40,7 +40,33 @@ def _load_existing_tickets() -> set[int]:
         return set()
 
 
-def sync_closed_trades(days_back: int = 30, risk_per_trade_idr: float = 0.0) -> int:
+def _risk_idr_from_deal(entry_deal, sl_price: float, cfg: dict) -> float:
+    """
+    Risiko rupiah sebuah posisi, dihitung dari lot dan jarak SL saat entry.
+
+    Dihitung ULANG dari data deal, bukan diambil dari state bot, karena
+    state bot hilang setiap restart sementara riwayat deal tidak. Ini
+    membuat kolom r_multiple tetap terisi untuk posisi yang dibuka sebelum
+    restart terakhir.
+
+    Bila SL tidak diketahui (posisi ditutup manual sebelum SL sempat
+    terbaca), pakai sl_typical_points dari config sebagai perkiraan —
+    lebih baik R yang mendekati daripada kolom kosong.
+    """
+    sym = cfg["symbol"]
+    point = sym["point"]
+    value_per_point = sym["value_per_point_idr"]
+
+    if sl_price and sl_price > 0:
+        sl_points = abs(entry_deal.price - sl_price) / point
+    else:
+        sl_points = cfg["trade_distances"]["sl_typical_points"]
+
+    return sl_points * value_per_point * entry_deal.volume
+
+
+def sync_closed_trades(days_back: int = 30, risk_per_trade_idr: float = 0.0,
+                       config: dict | None = None) -> int:
     """
     Ambil posisi yang sudah tertutup dari MT5 dan catat yang belum ada.
 
@@ -48,6 +74,11 @@ def sync_closed_trades(days_back: int = 30, risk_per_trade_idr: float = 0.0) -> 
     trade yang sudah tercatat dilewati.
     """
     LOG_DIR.mkdir(exist_ok=True)
+
+    if config is None:
+        from ..data.mt5_gateway import load_config
+        config = load_config()
+    cfg = config
 
     to_time = datetime.now() + timedelta(days=1)
     from_time = datetime.now() - timedelta(days=days_back)
@@ -92,6 +123,21 @@ def sync_closed_trades(days_back: int = 30, risk_per_trade_idr: float = 0.0) -> 
         net = pnl + comm + swap
 
         duration = (exit_.time - entry.time) / 60.0
+
+        # r_multiple: pakai nilai yang dioper pemanggil bila ada, kalau
+        # tidak hitung dari lot + jarak SL posisi itu sendiri.
+        #
+        # DIPERBAIKI 10 Sep 2026: sebelumnya kolom ini SELALU kosong karena
+        # bot.py memanggil sync_closed_trades() tanpa risk_per_trade_idr.
+        # Akibatnya hasil live tidak bisa dibandingkan dengan expectancy
+        # backtest sama sekali - yang tersisa cuma winrate, padahal winrate
+        # bukan penentu profitabilitas pada RR 1:2,78.
+        risk_idr = risk_per_trade_idr
+        if not risk_idr:
+            try:
+                risk_idr = _risk_idr_from_deal(entry, 0.0, cfg)
+            except Exception:  # noqa: BLE001
+                risk_idr = 0.0
 
         new_rows.append({
             "ticket": pos_id,

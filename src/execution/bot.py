@@ -535,6 +535,16 @@ class TradingBot:
             f" (DD {self.risk.current_drawdown_pct(acc.equity):.1f}%)"
         )
 
+        # Status koneksi. down_since != None berarti sedang putus; backoff
+        # naik bertingkat supaya tidak membanjiri terminal yang sedang sakit.
+        down_since: Optional[float] = None
+        down_notified = False
+        backoff = poll_seconds
+        disconnect_limit = self.cfg.get("circuit_breaker", {}).get(
+            "mt5_disconnect_seconds",
+            self.risk.risk.get("circuit_breaker", {}).get("mt5_disconnect_seconds", 30),
+        )
+
         try:
             while True:
                 if self.stop_requested():
@@ -561,7 +571,11 @@ class TradingBot:
                     # Sumbernya riwayat MT5, bukan state internal - tahan
                     # terhadap restart atau crash.
                     try:
-                        n = sync_closed_trades(days_back=7)
+                        # config dioper agar journal bisa menghitung
+                        # r_multiple dari lot + jarak SL tiap posisi.
+                        # Tanpa kolom itu hasil live tidak bisa
+                        # dibandingkan dengan expectancy backtest.
+                        n = sync_closed_trades(days_back=7, config=self.cfg)
                         if n:
                             self.log(f"Journal: {n} trade baru dicatat")
                             # Rekonsiliasi rem risiko dari journal yang baru
@@ -580,15 +594,89 @@ class TradingBot:
                     self.risk.save_state()
 
                 except Exception as e:  # noqa: BLE001
+                    # JANGAN biarkan reconnect mematikan bot.
+                    #
+                    # DIPERBAIKI 10 Sep 2026: ensure_connected() melempar
+                    # ulang ConnectionError bila percobaan terakhir gagal.
+                    # Karena dipanggil di dalam blok except tanpa pelindung,
+                    # lemparan itu keluar dari try dan mematikan proses.
+                    # MT5 tersendat beberapa detik (restart terminal, Wi-Fi
+                    # putus, update broker) sudah cukup untuk membunuh bot,
+                    # meninggalkan posisi terbuka tanpa trailing, tanpa
+                    # break-even, dan tanpa max_bars_hold.
+                    #
+                    # Posisi terbuka justru MEMBUTUHKAN bot tetap hidup,
+                    # jadi loop harus bertahan dan terus mencoba.
                     self.log(f"ERROR siklus: {type(e).__name__}: {e}")
-                    self.gw.ensure_connected()
+                    try:
+                        self.gw.ensure_connected()
+                        if down_since is not None:
+                            gone = time.time() - down_since
+                            self.log(f"Koneksi pulih setelah {gone:.0f} detik.")
+                            notifier.notify_halt(
+                                f"Koneksi MT5 pulih setelah {gone:.0f} detik"
+                            )
+                            down_since = None
+                            down_notified = False
+                        backoff = poll_seconds
+                    except Exception as ce:  # noqa: BLE001
+                        if down_since is None:
+                            down_since = time.time()
+                        gone = time.time() - down_since
 
-                time.sleep(poll_seconds)
+                        # Ambang dari config circuit_breaker: beri tahu,
+                        # tapi JANGAN matikan bot.
+                        if not down_notified and gone >= disconnect_limit:
+                            down_notified = True
+                            self.log(
+                                f"!! Koneksi MT5 putus {gone:.0f}s "
+                                f"(ambang {disconnect_limit}s)."
+                            )
+                            try:
+                                notifier.notify_halt(
+                                    f"Koneksi MT5 putus {gone:.0f} detik. "
+                                    "Bot masih hidup dan terus mencoba."
+                                )
+                            except Exception:  # noqa: BLE001
+                                pass
+
+                        backoff = min(backoff * 2 if backoff else poll_seconds, 60)
+                        self.log(
+                            f"Reconnect gagal ({type(ce).__name__}). "
+                            f"Coba lagi dalam {backoff}s."
+                        )
+
+                time.sleep(backoff)
 
         except KeyboardInterrupt:
             self.log("Dihentikan oleh pengguna.")
         finally:
-            self.log(f"Posisi terbuka saat berhenti: {len(self.orders.get_positions())}")
+            # Jangan laporkan "0 posisi" ketika sebenarnya kita tidak bisa
+            # membacanya. Bot yang berhenti saat koneksi mati dulu selalu
+            # mencetak 0, membuat posisi yang masih terbuka tak terlihat.
+            try:
+                n_open = len(self.orders.get_positions()) if self.orders else None
+            except Exception:  # noqa: BLE001
+                n_open = None
+
+            if n_open is None:
+                self.log("Posisi terbuka saat berhenti: TIDAK DIKETAHUI "
+                         "(koneksi MT5 tidak terbaca) — periksa terminal manual.")
+            else:
+                self.log(f"Posisi terbuka saat berhenti: {n_open}")
+                if n_open:
+                    self.log("!! Posisi masih terbuka tanpa bot yang mengelolanya.")
+                    self.log("!! Trailing dan max_bars_hold TIDAK aktif; "
+                             "hanya SL/TP di server yang melindungi.")
+
+            try:
+                notifier.notify_halt(
+                    f"Bot BERHENTI. Posisi terbuka: "
+                    f"{'tidak diketahui' if n_open is None else n_open}"
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
             self.gw.disconnect()
             self._release_lock()
 
