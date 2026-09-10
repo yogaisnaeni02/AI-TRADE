@@ -81,6 +81,11 @@ class TradingBot:
         self.point = self.cfg["symbol"]["point"]
         self.mode = self.cfg.get("mode", "OBSERVER")
 
+        # Persetujuan eksplisit untuk berdagang di akun REAL. Disetel oleh
+        # run_bot.py --allow-real; default False supaya akun real tidak
+        # pernah tersentuh karena kelalaian.
+        self.allow_real = False
+
         self._last_bar_time: Optional[pd.Timestamp] = None
         self._halt_notified = False
         self._entry_info: dict[int, dict] = {}  # ticket -> {entry, sl_dist, be_done}
@@ -407,12 +412,38 @@ class TradingBot:
         """
         import os
 
+        import socket
+
+        host = socket.gethostname()
         LOG_DIR.mkdir(exist_ok=True)
         if LOCK_FILE.exists():
+            raw = ""
             try:
-                pid = int(LOCK_FILE.read_text().strip())
-            except (ValueError, OSError):
+                raw = LOCK_FILE.read_text().strip()
+            except OSError:
+                raw = ""
+
+            # Format lock: "<host> <pid>". Format lama (hanya pid) tetap
+            # dibaca supaya lock lama tidak bikin bot gagal start.
+            parts = raw.split()
+            lock_host = parts[0] if len(parts) == 2 else host
+            try:
+                pid = int(parts[-1]) if parts else None
+            except ValueError:
                 pid = None
+
+            # Lock dari MESIN LAIN tidak boleh diambil alih.
+            #
+            # tasklist hanya melihat proses di mesin ini, jadi PID milik PC
+            # lain selalu tampak "mati" dan lock-nya dirampas. Kalau logs/
+            # ter-share (OneDrive, network drive), dua bot bisa jalan
+            # bersamaan di akun yang sama: order dobel, dan max_open_positions
+            # jebol karena keduanya membaca "belum ada posisi" berbarengan.
+            if lock_host != host:
+                self.log(f"!! Lock dipegang mesin lain: {lock_host} (PID {pid}).")
+                self.log("!! Jalankan bot hanya di SATU PC per akun MT5.")
+                self.log(f"!! Bila {lock_host} sudah pasti mati, hapus logs/bot.lock")
+                return False
 
             if pid and pid != os.getpid():
                 # Cek apakah proses itu masih hidup
@@ -432,7 +463,7 @@ class TradingBot:
                     self.log("!! Hentikan bot itu dulu, atau hapus logs/bot.lock")
                     return False
 
-        LOCK_FILE.write_text(str(os.getpid()))
+        LOCK_FILE.write_text(f"{host} {os.getpid()}")
         return True
 
     def _release_lock(self) -> None:
@@ -460,8 +491,21 @@ class TradingBot:
         self.log("=" * 58)
 
         if self.mode == "EXECUTOR" and not is_demo:
+            # DIPERKETAT 10 Sep 2026: dulu hanya time.sleep(10) lalu LANJUT
+            # trading. Kalau terminal tidak diawasi selama 10 detik, bot
+            # langsung berdagang dengan uang sungguhan tanpa satu pun
+            # persetujuan eksplisit. Sekarang berhenti, dan butuh flag
+            # --allow-real yang disengaja.
             self.log("!! AKUN REAL terdeteksi di mode EXECUTOR.")
-            self.log("!! Hentikan sekarang bila ini tidak disengaja (Ctrl+C).")
+            self.log("!! Basis bukti strategi ini belum memenuhi ambang untuk uang")
+            self.log("!! sungguhan (t=2,25 dari 22 kombinasi; negatif di M15).")
+            self.log("!! Lihat docs/28-HASIL-KALIBRASI-ULANG.md bagian 4.")
+            if not self.allow_real:
+                self.log("!! DIHENTIKAN. Jalankan dengan --allow-real bila memang disengaja.")
+                self._release_lock()
+                self.gw.disconnect()
+                raise SystemExit(1)
+            self.log("!! --allow-real aktif — melanjutkan ke akun REAL dalam 10 detik.")
             time.sleep(10)
 
         if not self.gw.is_trade_allowed():

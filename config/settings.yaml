@@ -156,10 +156,22 @@ sessions:
   ny_afternoon:    {start: "23:00", end: "04:00", trade: false}
   friday_cutoff:   "21:00"    # tidak ada entry baru setelah ini
 
-# ADVISOR = hasilkan sinyal + lewati semua guardrail, TAPI tidak kirim order.
-# Naikkan ke EXECUTOR hanya setelah forward test demo mengumpulkan ~200 trade
-# dengan expectancy tetap positif (docs/28-HASIL-KALIBRASI-ULANG.md bagian 4).
-mode: ADVISOR                # OBSERVER -> ADVISOR -> EXECUTOR
+# EXECUTOR = bot mengirim order sungguhan.
+#
+# Diaktifkan atas permintaan pemilik (10 Sep 2026) untuk forward test di
+# akun DEMO. Yang perlu diketahui sebelum ini diarahkan ke akun real:
+#
+#   - Basis buktinya t = 2,25, dipilih dari 22 kombinasi yang diuji pada
+#     data yang sama. Ambang jujurnya ~2,9 (koreksi Bonferroni).
+#   - Setelan yang sama NEGATIF di M15 (-0,141R atas 4,23 tahun), walau
+#     stabil positif di kedua paruh M5.
+#   - Max drawdown terukur di backtest 20,1%, dan itu pada periode yang
+#     expectancy-nya positif.
+#
+# Justru itu forward test ini dijalankan: mengumpulkan ~200 trade demo
+# (sekitar 7 bulan pada 363 trade/tahun) untuk menjawab apakah edge-nya
+# nyata. Lihat docs/28-HASIL-KALIBRASI-ULANG.md bagian 4.
+mode: EXECUTOR                # OBSERVER -> ADVISOR -> EXECUTOR
                               # jangan naikkan sebelum lulus gate tiap tahap
 
 # Notifikasi Telegram (opsional). Isi keduanya untuk mengaktifkan.
