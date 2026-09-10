@@ -76,7 +76,7 @@ trade_distances:
   # tercapai dan efek bersihnya positif: pada varian terpilih t naik dari
   # 1,81 (RR 1:3) ke 2,05 (RR 1:2,78).
   #
-  # CATATAN: winrate terukur 30,86% - margin ke breakeven tinggal 2,7pp.
+  # CATATAN: winrate terukur 31,1% (periode penuh) - margin ke breakeven 2,9pp.
   # Jangan naikkan RR lebih jauh tanpa mengukur ulang.
   min_rr_ratio: 2.78
   atr_sl_multiplier: 1.0      # ATR median ~424 pip -> jatuh di rentang di atas
