@@ -31,3 +31,6 @@ data_backup_pre_timefix/
 
 # Dataset turunan yang bisa dibangun ulang (pipeline.build_dataset)
 data/processed/XAUUSDm_M15_features.parquet
+
+# artefak sementara CatBoost (dibuat scripts/ml_banding_algoritma.py)
+catboost_info/
