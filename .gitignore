@@ -25,3 +25,6 @@ Thumbs.db
 # Runtime state risk manager (bukan konfigurasi)
 logs/risk_state.json
 logs/*.tmp
+
+# Backup data sebelum perbaikan offset waktu (lokal saja, jangan di-commit)
+data_backup_pre_timefix/

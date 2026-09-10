@@ -15,7 +15,7 @@ from typing import Optional
 import MetaTrader5 as mt5
 import pandas as pd
 
-from .mt5_gateway import MT5Gateway, load_config
+from .mt5_gateway import MT5Gateway, detect_server_offset_hours, load_config
 
 TIMEFRAMES = {
     "M1": mt5.TIMEFRAME_M1,
@@ -29,10 +29,10 @@ DATA_RAW = Path(__file__).resolve().parents[2] / "data" / "raw"
 
 
 def _bars_to_frame(bars) -> pd.DataFrame:
+    # MT5 mengembalikan epoch detik dalam jam dinding SERVER. Disimpan
+    # apa adanya di sini; konversi ke UTC dilakukan sekali di bawah,
+    # memakai offset yang DIUKUR (lihat download_timeframe).
     df = pd.DataFrame(bars)
-    # MT5 mengembalikan epoch detik dalam waktu SERVER. Broker ini berjalan
-    # di UTC+7 (terverifikasi di probe), jadi kita simpan sebagai naive
-    # server-time dan konversi ke UTC secara eksplisit di bawah.
     df["time"] = pd.to_datetime(df["time"], unit="s")
     return df
 
@@ -80,9 +80,30 @@ def download_timeframe(
     df = pd.concat(frames, ignore_index=True)
     df = df.drop_duplicates(subset="time").sort_values("time").reset_index(drop=True)
 
-    # Normalisasi ke UTC. Semua logika sesi bekerja di UTC agar tidak rapuh
-    # terhadap perubahan DST atau offset server.
-    offset_hours = cfg["broker"].get("server_utc_offset", 7)
+    # Normalisasi ke UTC memakai offset yang DIUKUR dari server, bukan
+    # angka statis di config.
+    #
+    # BUG YANG DIPERBAIKI (10 Sep 2026): baris ini dulu memakai
+    # cfg["broker"]["server_utc_offset"] = 7, sementara bot live memakai
+    # detect_server_offset_hours() = 0. Server broker ini UTC+0, sehingga
+    # pengurangan 7 jam menggeser SELURUH data historis ke belakang dan
+    # membuat klasifikasi sesi meleset 7 jam. Backtest dan bot live
+    # memperdagangkan jam yang berbeda tanpa ada yang menyadarinya.
+    # Bukti dari data: bar Jumat terakhir jatuh 14:55 pada time_utc lama,
+    # padahal pasar tutup 21:00-22:00 UTC.
+    #
+    # Sekarang kedua jalur memanggil sumber yang sama.
+    offset_hours = detect_server_offset_hours()
+
+    configured = cfg["broker"].get("server_utc_offset")
+    if configured is not None and configured != offset_hours:
+        raise ValueError(
+            f"Offset server terukur {offset_hours} jam, tetapi config "
+            f"mencatat {configured}. Perbarui broker.server_utc_offset di "
+            "config/settings.yaml sebelum mengunduh — data yang diunduh "
+            "dengan offset keliru akan menggeser seluruh klasifikasi sesi."
+        )
+
     df["time_server"] = df["time"]
     df["time"] = df["time"] - pd.Timedelta(hours=offset_hours)
     df = df.rename(columns={"time": "time_utc"})

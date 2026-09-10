@@ -10,7 +10,22 @@ broker:
   account_type: Standard      # bukan Cent - sudah diverifikasi layak
   currency: IDR
   leverage: 2000
-  server_utc_offset: 7        # terverifikasi: waktu server = WIB = UTC+7
+  # DIKOREKSI 10 Sep 2026: sebelumnya 7, dan itu SALAH.
+  #
+  # Bukti dari data, bukan dari asumsi: pasar forex tutup Jumat dan buka
+  # Minggu sekitar 21:00-22:00 UTC (17:00 New York). Pada data/raw/*.parquet
+  # kolom time_server jatuh tepat di 21:55/22:00, sedangkan time_utc lama
+  # jatuh di 14:55/15:00 - meleset persis 7 jam.
+  #
+  # Artinya server broker ini UTC+0 dan epoch dari MT5 SUDAH UTC. Nilai 7
+  # yang lama membuat downloader mengurangi 7 jam dari nilai yang sudah
+  # benar, menggeser seluruh data historis dan membuat klasifikasi sesi
+  # salah sasaran. Bot live memakai offset terdeteksi (0) sehingga backtest
+  # dan live memperdagangkan jam yang berbeda.
+  #
+  # Downloader sekarang MENGUKUR offset dan menolak jalan bila nilai di
+  # sini tidak cocok - jangan ubah tanpa mengukur ulang.
+  server_utc_offset: 0
 
 symbol:
   name: XAUUSDm               # WAJIB pakai akhiran 'm' (konvensi Exness)

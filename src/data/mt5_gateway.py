@@ -9,7 +9,7 @@ mt5.initialize() di tempat lain (termasuk dashboard).
 from __future__ import annotations
 
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -128,23 +128,59 @@ class MT5Gateway:
 
 def detect_server_offset_hours() -> int:
     """
-    Deteksi offset waktu server MT5 terhadap waktu lokal PC, langsung dari
-    tick terkini — bukan angka statis di config.
+    Deteksi offset waktu server MT5 terhadap UTC, langsung dari tick
+    terkini — bukan angka statis di config.
 
     Offset statis berbahaya: broker bisa menggeser jam server (DST, migrasi
     server) tanpa pemberitahuan. Saat itu terjadi, offset lama membuat bot
     salah menghitung sesi trading dan diam padahal seharusnya aktif —
     persis yang ditemukan 9 Sep 2026 (bot mengira jam 12:35 WIB padahal
     sebenarnya 19:37 WIB, selisih 7 jam sesuai offset lama).
+
+    CATATAN PERBANDINGAN (10 Sep 2026): versi sebelumnya memakai
+    `datetime.fromtimestamp()` vs `datetime.now()`, yaitu dua nilai waktu
+    LOKAL. Suku offset laptop kebetulan saling meniadakan sehingga hasilnya
+    tetap benar, tetapi hanya secara kebetulan dan tidak jelas terbaca.
+    Sekarang perbandingannya eksplisit di UTC sehingga tidak bergantung
+    pada zona waktu mesin yang menjalankan bot.
     """
     info = mt5.symbol_info_tick(load_config()["symbol"]["name"])
     if info is None or info.time == 0:
-        return load_config()["broker"].get("server_utc_offset", 7)
+        # JANGAN jatuh ke angka config secara diam-diam. Nilai statis di
+        # config pernah salah 7 jam dan menggeser seluruh dataset; kalau
+        # offset tidak bisa diukur, itu harus terlihat, bukan ditebak.
+        raise ConnectionError(
+            "Tidak bisa mengukur offset server: tick tidak tersedia. "
+            "Pastikan MT5 terhubung dan simbol aktif di Market Watch."
+        )
 
-    server_time = datetime.fromtimestamp(info.time)
-    local_time = datetime.now()
-    diff_hours = round((server_time - local_time).total_seconds() / 3600)
-    return diff_hours
+    # MT5 mengembalikan jam dinding server sebagai epoch. Membacanya
+    # sebagai UTC memberi jam dinding server apa adanya, lalu selisihnya
+    # terhadap UTC sekarang adalah offset server.
+    server_wall = datetime.fromtimestamp(info.time, tz=timezone.utc)
+    now_utc = datetime.now(timezone.utc)
+    return round((server_wall - now_utc).total_seconds() / 3600)
+
+
+def bars_to_utc_frame(bars, offset_hours: int) -> "pd.DataFrame":
+    """
+    Ubah bar mentah MT5 menjadi DataFrame ber-`time_utc` yang benar.
+
+    SATU-SATUNYA tempat konversi waktu di seluruh sistem. Sebelumnya
+    `downloader.py` dan `bot.py` masing-masing menghitung sendiri dengan
+    sumber offset yang BERBEDA (config statis vs deteksi runtime), sehingga
+    data historis bergeser 7 jam terhadap data live — backtest dan bot
+    memperdagangkan jam yang berbeda tanpa ada yang menyadarinya.
+
+    `time_server` disimpan apa adanya agar konversi selalu bisa diaudit
+    ulang tanpa mengunduh ulang.
+    """
+    import pandas as pd
+
+    df = pd.DataFrame(bars)
+    df["time_server"] = pd.to_datetime(df["time"], unit="s")
+    df["time_utc"] = df["time_server"] - pd.Timedelta(hours=offset_hours)
+    return df.drop(columns=["time"])
 
 
 def points_to_pips(points: float, config: Optional[dict] = None) -> float:

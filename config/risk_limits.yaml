@@ -46,7 +46,24 @@ per_trade:
   # compounding lewat kerugian beruntun.
   #
   # 1% masih 2x standar profesional (0,5%) - tetap agresif.
-  max_risk_percent: 1.0
+  # DIKOREKSI 10 Sep 2026 menjadi angka yang SEBENARNYA berlaku.
+  #
+  # Nilai 1.0 sebelumnya tidak pernah tercapai. Lot minimum broker (0,01)
+  # mengunci risiko pada nilai TETAP:
+  #     4000 points x Rp 1.748,36/point x 0,01 lot = Rp 69.934 per trade
+  #
+  # Terhadap equity itu berarti:
+  #     Rp 5.198.659 (equity saat ini) -> 1,35%
+  #     Rp 3.700.000 (min_equity_idr)  -> 1,89%
+  #     Rp 6.993.440                   -> 1,00%
+  #
+  # Risiko baru turun ke 1% kalau equity di atas ~Rp 7 juta. Di bawah itu
+  # lot minimum yang menentukan, bukan angka di file ini.
+  #
+  # Ditulis 1.35 agar config mencerminkan kenyataan. Ini BUKAN kenaikan
+  # risiko - risikonya memang sudah sebesar ini sejak awal, hanya salah
+  # tercatat. Lihat docs/27-AUDIT-TEMUAN.md bagian 7.
+  max_risk_percent: 1.35
   min_rr_ratio: 2.0           # dinaikkan sebagai kompensasi risiko besar
   max_lot_percent_equity: 5.0 # hard cap absolut
 
