@@ -1,17 +1,35 @@
 """
 Klasifikasi sesi trading dan pelacakan Asia range.
 
-Waktu server broker = WIB = UTC+7 (terverifikasi Tahap 0). Semua data
-sudah dinormalisasi ke UTC di downloader, jadi modul ini bekerja di UTC.
+Waktu server broker = UTC+0 (diverifikasi 10 Sep 2026, lihat
+config/settings.yaml::broker.server_utc_offset). Kolom time_utc pada data
+sudah UTC murni, jadi modul ini membandingkan langsung dengan jam UTC.
 
-Jam sesi dalam UTC (setara WIB dikurangi 7):
-  Asia          06:00-14:00 WIB = 23:00-07:00 UTC
-  London open   14:00-17:00 WIB = 07:00-10:00 UTC
-  London-NY     19:30-23:00 WIB = 12:30-16:00 UTC
-  NY sore       23:00-04:00 WIB = 16:00-21:00 UTC
+DIPERBAIKI 10 Sep 2026 — batas jam di bawah ini SEBELUMNYA salah 7 jam.
 
-Catatan: broker ini punya spread FIXED di semua sesi, jadi pemilihan sesi
-didasarkan pada kualitas volatilitas, bukan penghematan biaya.
+Nilai lama dihitung dengan asumsi server UTC+7 ("WIB dikurangi 7"). Setelah
+offset dikoreksi ke 0, batas itu tidak ikut dikoreksi, sehingga setiap bar
+mendapat label sesi yang meleset 7 jam:
+
+    jam 00-03 UTC (Asia sesungguhnya)   -> berlabel "ny_afternoon", DITRADINGKAN
+    jam 07-13 UTC (London sesungguhnya) -> berlabel "asia",         DIBLOKIR
+    jam 14-16 UTC (overlap London-NY)   -> berlabel "london_open"
+
+Akibatnya sesi paling likuid dalam sehari tidak pernah ditradingkan sama
+sekali. Bukti: volatilitas median per jam UTC memuncak di 13:00-15:00
+(608/624/507 pip) — itu overlap London-NY yang sebenarnya.
+
+Batas baru mengikuti jam pasar yang sesungguhnya (UTC):
+  Tokyo/Asia        23:00-07:00
+  London open       07:00-12:00
+  London-NY overlap 12:00-16:00   <- paling likuid
+  NY sore           16:00-21:00
+  Rollover          21:00-23:00
+
+`trade=True` untuk semua sesi: ranking sesi lama diukur pada label yang
+salah, jadi tidak bisa dipakai. Pemilihan sesi sekarang diserahkan ke
+filter kualitas (momentum/ATR/fib) dan ke `momentum_sessions` di config
+bila nanti diukur ulang dengan data yang benar.
 """
 
 from __future__ import annotations
@@ -21,16 +39,11 @@ import pandas as pd
 
 # (nama, jam_mulai_utc, jam_selesai_utc, boleh_trading)
 SESSIONS = [
-    ("asia", 23.0, 7.0, False),
-    ("london_open", 7.0, 10.0, True),
-    ("pre_ny", 10.0, 12.5, False),
-    ("london_ny", 12.5, 16.0, True),
-    # NY sore DIBUKA berdasar pengujian: setup momentum menghasilkan
-    # +0,278R di sesi ini (n=1191, 4/6 kuartal positif) - terbaik dari
-    # seluruh sesi. Asumsi awal bahwa sesi ini kurang layak keliru untuk
-    # strategi momentum; itu benar untuk strategi sweep/reversal.
+    ("asia", 23.0, 7.0, True),
+    ("london_open", 7.0, 12.0, True),
+    ("london_ny", 12.0, 16.0, True),
     ("ny_afternoon", 16.0, 21.0, True),
-    ("rollover", 21.0, 23.0, True),  # sudah dibuka sebelumnya
+    ("rollover", 21.0, 23.0, True),
 ]
 
 TRADING_SESSIONS = {name for name, _, _, ok in SESSIONS if ok}

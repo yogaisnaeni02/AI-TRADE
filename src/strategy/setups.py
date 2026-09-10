@@ -102,21 +102,53 @@ class RuleEngine:
         self.atr_lo = float(mf.get("atr_percentile_min", 0.20))
         self.atr_hi = float(mf.get("atr_percentile_max", 0.95))
 
-        # Patuhi `is_trading_session` atau tidak.
+        # Patuhi kolom `is_trading_session` atau tidak. MATI default.
         #
-        # Kolom itu berasal dari daftar SESSIONS hardcode di sessions.py,
-        # yang menandai `asia` dan `pre_ny` sebagai trade=False. Penandaan
-        # itu warisan kalibrasi lama yang dilakukan pada data berlabel
-        # waktu SALAH 7 jam, jadi tidak punya dasar lagi.
+        # Jaring pengaman, bukan pengubah perilaku: sejak sessions.py
+        # dikoreksi (10 Sep 2026) SEMUA sesi bertanda trade=True, sehingga
+        # kolom itu selalu True dan flag ini tidak berpengaruh apa pun.
         #
-        # Diukur pada data yang sudah benar (10 Sep 2026, 1,41 thn):
+        # Tetap ada karena penandaan trade=False pernah membuat backtest
+        # memblokir 7 jam penuh tanpa disadari. Diukur pada daftar SESSIONS
+        # yang lama (asia & pre_ny = False), efeknya besar:
         #   patuhi is_trading_session : n=457  E[R]=-0,1254  t=-1,65  DD 89%
-        #   24 jam penuh              : n=897  E[R]=+0,1254  t=+2,14  DD 32%
+        #   abaikan (24 jam penuh)    : n=897  E[R]=+0,1254  t=+2,14  DD 32%
         #
-        # Jam yang diblokir daftar lama (Tokyo 23-07 UTC dan pre-NY 10-12)
-        # justru yang menguntungkan; jam London/NY "resmi" yang rugi.
-        # Default false = 24 jam, sesuai keputusan pemilik.
+        # Jadi bila suatu saat ada sesi ditandai trade=False lagi, flag ini
+        # membuat keputusannya eksplisit di config, bukan tersembunyi di
+        # daftar hardcode.
         self.require_trading_session = bool(mf.get("require_trading_session", False))
+
+
+        # Filter konfluensi (candle searah + ADX + tren M5). MATI default.
+        #
+        # Kandidat terkuat di proyek ini. Diukur dengan halt DD dimatikan
+        # tetapi batas harian TETAP AKTIF (metode yang benar - batas harian
+        # adalah bagian dari sistem yang akan berjalan live; lihat docs/38):
+        #
+        #             tanpa filter    dengan filter
+        #   n              675             519  (77%)
+        #   E[R]        +0,1327         +0,2510
+        #   t             +1,95           +3,14   <- lampaui ambang ~3,0
+        #   walk-forward    3/5             5/5
+        #   holdout 30%  +0,0748         +0,2805
+        #
+        # t=3,14 melampaui ambang Bonferroni ~3,0 yang ditetapkan docs/30
+        # setelah 50+ percobaan pada data M5 yang sama. Ini satu-satunya
+        # angka di proyek ini yang mencapainya - momentum_fib sendiri 1,95.
+        #
+        # Yang membuatnya bisa dipercaya: HOLDOUT 30% TERSEGEL juga positif
+        # (+0,2805), dan data itu tidak pernah dipakai memilih filter.
+        #
+        # Tetap dimatikan karena docs/29 melarang mengubah logika sinyal
+        # selama forward test berjalan. Aktifkan SETELAH forward test:
+        #     momentum_fib:
+        #       confluence_filter: true
+        #
+        # Pengukuran lengkap: docs/36-UJI-GABUNGAN-TEKNIK.md (30 filter),
+        # docs/37-UJI-BOS-CHOCH.md (BOS/CHoCH gagal), docs/38 (metode).
+        self.confluence_filter = bool(mf.get("confluence_filter", False))
+        self.confluence_adx_min = float(mf.get("confluence_adx_min", 25.0))
 
     # -- helper ----------------------------------------------------------
 
@@ -400,6 +432,40 @@ class RuleEngine:
             direction = "sell"
         else:
             return None
+
+        # Filter konfluensi - hanya MEMBUANG sinyal, tidak pernah mengubah
+        # arah/SL/TP/lot. Sinyal yang lolos identik dengan tanpa filter.
+        #
+        # Dua syarat yang terbukti menyumbang sendiri-sendiri di holdout:
+        #   ADX > 25       -> tren cukup kuat (E +0,026 -> +0,105 sendirian)
+        #   candle searah  -> bar sinyal searah arah entry (-> +0,052)
+        #   keduanya       -> +0,128
+        #
+        # MACD dan Stochastic sengaja TIDAK dipakai: keduanya MEMPERBURUK
+        # hasil (-0,040R dan -0,065R). MACD mengulang informasi momentum(24)
+        # yang sudah dipakai setup ini, hanya lebih terlambat.
+        if self.confluence_filter:
+            adx = getattr(row, "adx", None)
+            if adx is None or pd.isna(adx) or adx <= self.confluence_adx_min:
+                return None
+
+            bull_candle = row.close > row.open
+            if (direction == "buy") != bull_candle:
+                return None
+
+            # Tren struktur M5 tidak boleh MELAWAN arah entry. Sengaja
+            # longgar - "ranging" tetap diterima, hanya arah berlawanan yang
+            # ditolak. Membuang 3,4% trade, menaikkan E di kedua periode
+            # (seleksi +0,143 -> +0,163, holdout +0,128 -> +0,155).
+            #
+            # BOS dan CHoCH sengaja TIDAK dipakai: keduanya memperburuk
+            # (-0,026R dan -0,135R). BOS mengulang momentum(24) lebih
+            # terlambat; CHoCH mencari pembalikan sementara setup ini mencari
+            # kelanjutan. Lihat docs/37-UJI-BOS-CHOCH.md.
+            trend_m5 = getattr(row, "trend", None)
+            opposite = "downtrend" if direction == "buy" else "uptrend"
+            if trend_m5 == opposite:
+                return None
 
         score = 5 if size_tier == "full" else 3
         reasons = [

@@ -7,16 +7,31 @@
 # yang melanggarnya. Jangan longgarkan saat sedang rugi - limit ini
 # justru dibuat untuk momen tersebut.
 
-# Equity simulasi untuk mode demo. XAUUSD butuh minimal Rp 3,7 juta agar
-# SL 650 pip (ATR x1.5) menghasilkan risiko 3% pada lot minimum 0,01.
-simulated_equity_idr: 3700000
+# Equity simulasi untuk mode demo.
+simulated_equity_idr: 4000000
 
 # Equity minimum agar bot mau membuka posisi. Melindungi dari akun kosong
 # atau akun yang baru saja terkena stop out.
 #
-# Rp 3,7 juta adalah ambang teknis XAUUSD: di bawah itu lot minimum (0,01)
-# dengan SL 400 pip memaksa risiko di atas 2% per trade.
-min_equity_idr: 3700000
+# DIKOREKSI 10 Sep 2026. Nilai lama (Rp 3,7 juta) dihitung dari SL 650 pip
+# - setelan yang sudah dibuang. SL yang berlaku sekarang 400 pip (maksimum
+# 450 pip), jadi dasarnya berubah.
+#
+# Yang mengunci angka ini: lot minimum broker 0,01 tidak bisa dipecah lagi,
+# sehingga rugi per trade adalah nilai TETAP, bukan persentase:
+#
+#     SL maksimum 4500 points x Rp 1.748,36/point x 0,01 lot = Rp 78.676
+#
+# Terhadap modal, itu berarti:
+#     Rp 4.000.000  -> 1,97%  <- ambang dipakai (batas atas "agresif wajar")
+#     Rp 5.827.867  -> 1,35%  <- target risiko config tercapai presisi
+#     Rp 3.000.000  -> 2,62%  (agresif, tidak disarankan)
+#     Rp 2.000.000  -> 3,93%  (7 loss beruntun = -28% modal)
+#
+# Ambang 4 juta dipilih, bukan 5,8 juta, supaya bot tetap bisa jalan di
+# modal yang wajar - dengan konsekuensi risiko efektif ~1,97% bukan 1,35%.
+# Untuk risiko sesuai target, modalnya Rp 5,8 juta.
+min_equity_idr: 4000000
 
 # Tiered sizing: dua tingkat sinyal, keduanya terbukti untung, risiko
 # beda sesuai jarak ke breakeven.
@@ -51,10 +66,11 @@ per_trade:
   # Nilai 1.0 sebelumnya tidak pernah tercapai. Lot minimum broker (0,01)
   # mengunci risiko pada nilai TETAP:
   #     4000 points x Rp 1.748,36/point x 0,01 lot = Rp 69.934 per trade
+  #     4500 points (SL maks)          x 0,01 lot = Rp 78.676 per trade
   #
-  # Terhadap equity itu berarti:
-  #     Rp 5.198.659 (equity saat ini) -> 1,35%
-  #     Rp 3.700.000 (min_equity_idr)  -> 1,89%
+  # Terhadap equity itu berarti (memakai SL tipikal 4000 points):
+  #     Rp 4.000.000 (min_equity_idr)  -> 1,75%  (1,97% pada SL maks)
+  #     Rp 5.180.296                   -> 1,35%
   #     Rp 6.993.440                   -> 1,00%
   #
   # Risiko baru turun ke 1% kalau equity di atas ~Rp 7 juta. Di bawah itu
