@@ -356,19 +356,22 @@ class RuleEngine:
         # tidak pernah bisa dibuktikan.
         #
         # Sapuan (scripts/sweep_frequency.py) menunjukkan pelonggaran gate
-        # ini menaikkan trade 106 -> 512 (5x) dengan expectancy IKUT NAIK
-        # (-0,018R -> +0,162R), bukan turun. Itu menandakan rentang lama
+        # ini menaikkan jumlah trade dengan expectancy IKUT NAIK, bukan
+        # turun. Periode penuh tanpa halt DD: baseline 602 trade / +0,100R
+        # (t 1,42) -> 721 trade / +0,156R (t 2,38). Itu menandakan rentang lama
         # membuang peluang bagus, bukan menyaring yang jelek. Melonggarkan
         # gate LAIN (momentum, fib) tidak menambah apa pun, dan melonggarkan
         # semuanya sekaligus justru hancur (WR 15,6%) - jadi spesifik gate
         # ATR ini yang salah kalibrasi.
         #
-        # Stabil di kedua paruh M5: +0,138R (Apr-Des 25) dan +0,156R
-        # (Des 25-Sep 26).
+        # Stabil di kedua paruh M5: +0,177R (Apr-Des 25) dan +0,134R
+        # (Des 25-Sep 26). Max drawdown alami 32% - kill switch 20% AKAN
+        # menyala kira-kira sekali per 1,4 tahun, dan itu sesuai desain.
         #
         # BATAS KEPERCAYAAN - baca sebelum menaikkan risiko:
-        # t = 2,05 diperoleh setelah menguji 22 kombinasi pada data yang
-        # sama; ambang jujurnya ~2,9. Dan varian ini NEGATIF di M15
+        # t = 2,38 diperoleh setelah menguji ~50 kombinasi pada data yang
+        # sama (termasuk 7 strategi alternatif yang semuanya negatif);
+        # ambang jujurnya ~3,0. Dan varian ini NEGATIF di M15
         # (-0,141R atas 4,23 tahun), termasuk setelah SL dikalibrasi ulang.
         # Boleh jadi edge-nya memang khas M5, boleh jadi ini artefak 1,4
         # tahun data. Belum terjawab. Lihat docs/28-HASIL-KALIBRASI-ULANG.md

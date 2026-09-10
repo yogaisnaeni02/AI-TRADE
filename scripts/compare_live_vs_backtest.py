@@ -39,10 +39,12 @@ ROOT = Path(__file__).resolve().parents[1]
 TRADES_CSV = ROOT / "logs" / "trades.csv"
 
 # Acuan dari backtest M5 (docs/28-HASIL-KALIBRASI-ULANG.md bagian 1).
-BT_EXPECTANCY = 0.1749
-BT_WINRATE = 31.77
-BT_PF = 1.31
-BT_TRADES_PER_DAY = 2.90
+# Periode PENUH tanpa halt DD (docs/28 revisi 2). Angka lama 0.1749/31.77/
+# 1.31/2.90 berasal dari backtest yang terpotong halt 20% pada Mar 2026.
+BT_EXPECTANCY = 0.1557
+BT_WINRATE = 31.1
+BT_PF = 1.28
+BT_TRADES_PER_DAY = 1.40   # per hari KALENDER (721 trade / 515 hari)
 BREAKEVEN_WR = 28.17   # RR 1:2,78 setelah spread 260 points
 
 # Komentar yang menandai trade uji manual, bukan hasil strategi.
@@ -180,9 +182,9 @@ def main() -> int:
     if "expectancy" in s:
         print(f"\nCI 95% E[R] live : [{s['ci_lo']:+.4f} ; {s['ci_hi']:+.4f}]   t = {s['t']:.2f}")
         if s["ci_lo"] <= BT_EXPECTANCY <= s["ci_hi"]:
-            print("Backtest (+0,1749R) BERADA di dalam CI live - konsisten.")
+            print("Backtest (+0,1557R) BERADA di dalam CI live - konsisten.")
         else:
-            print("Backtest (+0,1749R) DI LUAR CI live - hasil live menyimpang.")
+            print("Backtest (+0,1557R) DI LUAR CI live - hasil live menyimpang.")
 
     print(f"\nBreakeven winrate RR 1:2,78 = {BREAKEVEN_WR}%")
     print("\nVONIS")

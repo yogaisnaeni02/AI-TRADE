@@ -20,14 +20,30 @@ pengukuran pertama yang dilakukan pada data berlabel waktu yang benar.
 | `per_trade.max_risk_percent` | **1,35** | 1,0 (tidak pernah berlaku) |
 | `max_bars_hold` backtest | **48** (ikut config) | 120 (hardcode) |
 
-Hasil dari config apa adanya, M5, 1,41 tahun:
+> **KOREKSI (revisi 2, 10 Sep 2026 malam):** angka di revisi pertama dokumen
+> ini diukur dengan `global.max_drawdown_percent: 20` AKTIF di dalam backtest.
+> Engine menghentikan simulasi begitu drawdown 20% tersentuh — pada
+> 25 Maret 2026, **168 hari sebelum akhir data**. Jadi "513 trade" adalah
+> jumlah sebelum terpotong, bukan jumlah sesungguhnya. Halt itu adalah
+> guardrail operasional, bukan alat ukur; untuk pengukuran ia dimatikan.
+> Angka di bawah adalah periode penuh.
+
+Hasil dari config apa adanya, M5, 1,41 tahun, **periode penuh**:
 
 ```
-sinyal 4.743 -> trade 513
-E[R]  = +0,1749R    SE = 0,0779    t = 2,25
-winrate 31,77%      (breakeven RR 1:2,78 = 28,17%)
-profit factor 1,31  trade/tahun 363
+sinyal 4.743 -> trade 721
+E[R]  = +0,1557R    SE = 0,0654    t = 2,38
+winrate 31,1%       (breakeven RR 1:2,78 = 28,17%)
+profit factor 1,28  trade/tahun 510
+max drawdown 32,1%  loss beruntun maks 11
+paruh-1 +0,177R     paruh-2 +0,134R
 ```
+
+Implikasi operasional yang penting: **drawdown alami strategi ini 32%**,
+sehingga kill switch 20% di `risk_limits.yaml` DIHARAPKAN menyala kira-kira
+sekali per 1,4 tahun. Itu bukan tanda ada yang rusak — itu rem bekerja
+sesuai desain. Setelah menyala, perlu reset manual `logs/risk_state.json`
+setelah dievaluasi.
 
 ---
 
@@ -51,6 +67,23 @@ sinyal muncul dalam 48 bar setelah sinyal sebelumnya. momentum_fib
 menghasilkan ~259 episode momentum, bukan 3.382 peluang independen.
 
 ### Sapuan pelonggaran (M5, RR 1:2,78)
+
+> Tabel di bawah diukur dengan halt DD 20% aktif (terpotong). Verifikasi
+> ulang periode penuh tanpa halt **mengonfirmasi pilihannya**:
+>
+> | varian | n | E[R] | t | DD | paruh-1 | paruh-2 |
+> |---|---|---|---|---|---|---|
+> | baseline ATR 0,30-0,85 | 602 | +0,1002 | 1,42 | 30,2% | +0,146 | +0,055 |
+> | **ATR 0,20-0,95 (dipakai)** | **721** | **+0,1557** | **2,38** | 32,1% | +0,177 | +0,134 |
+> | ATR 0,20-0,95 + mom 0,35x | 774 | +0,1385 | 2,20 | 37,1% | +0,140 | +0,137 |
+> | ATR 0,20-0,85 | 645 | +0,1371 | 1,99 | **23,4%** | +0,134 | +0,140 |
+>
+> Baseline ternyata juga positif pada periode penuh (+0,10R) — angka
+> −0,01R sebelumnya sebagian artefak pemotongan. Pelonggaran ATR tetap
+> menambah ~120 trade dan menaikkan t dari 1,42 ke 2,38. Varian
+> ATR 0,20–0,85 menarik sebagai saudara ber-DD lebih rendah (23% vs 32%)
+> dengan E[R] serupa, tetapi TIDAK dipakai — mengganti lagi berarti
+> menambah percobaan pada data yang sama.
 
 | varian | n | E[R] | t | WR% |
 |---|---|---|---|---|
@@ -139,7 +172,7 @@ positif dan stabil di M5, frekuensinya cukup untuk mengumpulkan bukti
 **Belum layak untuk akun real** sampai salah satu terpenuhi:
 
 1. Forward test demo mengumpulkan ~200 trade dengan expectancy tetap
-   positif. Pada 363 trade/tahun itu sekitar 7 bulan.
+   positif. Pada 510 trade/tahun itu sekitar 5 bulan.
 2. Edge M5 terkonfirmasi di data M5 yang lebih panjang (butuh unduh ulang
    di luar batas 100.000 bar), atau di M1 sebagai timeframe tetangga.
 
