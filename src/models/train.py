@@ -229,7 +229,28 @@ if __name__ == "__main__":
         for _, r in imp.head(15).iterrows():
             print(f"    {r['feature']:<24} {r['gain']:>12,.0f}")
 
+        # PERINGATAN — model yang disimpan di sini TIDAK LAYAK PRODUKSI.
+        #
+        # `models[-1]` adalah fold TERAKHIR walk-forward, yang dilatih pada
+        # ~83% data (2025-04-11 s/d 2026-06-08 dari data berakhir 2026-09-09).
+        # Artinya model ini tidak punya periode uji yang bersih: mengukurnya
+        # pada data proyek ini hampir pasti menghasilkan angka BOCOR.
+        #
+        # Terbukti 10 Sep 2026 saat dicoba sebagai filter momentum_fib:
+        #   periode yang model sudah lihat : +0,1376 -> +0,3651  (terlihat hebat)
+        #   periode benar-benar bersih     : +0,1079 -> +0,0294  (MEMPERBURUK)
+        #
+        # Model disimpan hanya untuk inspeksi/feature importance. JANGAN
+        # dimuat oleh bot atau backtest. Bila suatu saat ML benar-benar
+        # dipakai, latih ulang pada SELURUH data setelah walk-forward
+        # memutuskan modelnya layak - dan model ini TIDAK layak
+        # (AUC out-of-sample 0,509 = setara acak).
+        #
+        # Lihat docs/40-STATUS-MODEL-ML.md.
         MODEL_DIR.mkdir(parents=True, exist_ok=True)
         models[-1].save_model(str(MODEL_DIR / "meta_model.txt"))
         imp.to_csv(MODEL_DIR / "feature_importance.csv", index=False)
         print(f"\n  Model tersimpan: {MODEL_DIR / 'meta_model.txt'}")
+        print("  PERINGATAN: model ini fold terakhir (dilatih ~83% data),")
+        print("  TIDAK punya periode uji bersih. Jangan dipakai produksi.")
+        print("  Lihat docs/40-STATUS-MODEL-ML.md")
