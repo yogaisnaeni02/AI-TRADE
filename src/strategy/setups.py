@@ -118,7 +118,7 @@ class RuleEngine:
         #     momentum_fib:
         #       confluence_filter: true
         #
-        # Pengukuran lengkap 22 filter: docs/32-UJI-GABUNGAN-TEKNIK.md
+        # Pengukuran lengkap 22 filter: docs/36-UJI-GABUNGAN-TEKNIK.md
         self.confluence_filter = bool(mf.get("confluence_filter", False))
         self.confluence_adx_min = float(mf.get("confluence_adx_min", 25.0))
 
@@ -430,7 +430,7 @@ class RuleEngine:
             # BOS dan CHoCH sengaja TIDAK dipakai: keduanya memperburuk
             # (-0,026R dan -0,135R). BOS mengulang momentum(24) lebih
             # terlambat; CHoCH mencari pembalikan sementara setup ini mencari
-            # kelanjutan. Lihat docs/33-UJI-BOS-CHOCH.md.
+            # kelanjutan. Lihat docs/37-UJI-BOS-CHOCH.md.
             trend_m5 = getattr(row, "trend", None)
             opposite = "downtrend" if direction == "buy" else "uptrend"
             if trend_m5 == opposite:

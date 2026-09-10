@@ -166,7 +166,7 @@ def add_structure(
         # CATATAN PEMAKAIAN: diuji sebagai filter untuk momentum_fib dan
         # HASILNYA NEGATIF (-0,135R, negatif di kedua paruh). CHoCH mencari
         # PEMBALIKAN sementara momentum_fib mencari KELANJUTAN - bertentangan
-        # secara desain. Lihat docs/33-UJI-BOS-CHOCH.md.
+        # secara desain. Lihat docs/37-UJI-BOS-CHOCH.md.
         if cur_trend == "uptrend":
             if last_directional == "downtrend":
                 choch[i] = 1
