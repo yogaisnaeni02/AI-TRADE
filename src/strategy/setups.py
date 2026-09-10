@@ -400,6 +400,36 @@ class RuleEngine:
         #   Di bawah 50% ambang TIDAK diambil sama sekali: pengujian
         #   menunjukkan tier itu sudah RUGI (WR turun ke bawah breakeven
         #   saat filter lain juga dilonggarkan). Lihat docs/18.
+        # ASIMETRI YANG DISENGAJA — JANGAN "PERBAIKI" TANPA MEMBACA INI.
+        #
+        # `mom_24` BERTANDA (positif = harga naik). Ambang `mom_24_q85`
+        # adalah kuantil 85, selalu positif. Jadi syarat di bawah berarti
+        # "harga sedang naik kuat" — untuk KEDUA arah.
+        #
+        # Untuk sell, itu menuntut harga NAIK padahal trend_htf wajib
+        # downtrend: dua syarat yang hampir saling meniadakan. Hasilnya
+        # sistem ini praktis hanya BUY: 4.180 sinyal buy vs 9 sell.
+        #
+        # Terlihat seperti bug, dan secara logika memang salah. Tetapi
+        # perbaikan simetris (-mom_24 untuk sell) SUDAH DIUJI dan MERUGIKAN:
+        #
+        #                    sekarang    simetris
+        #   trade                 675       1.140
+        #   E[R]             +0,1327     +0,0725
+        #   t                  +1,95       +1,41
+        #   holdout          +0,0748     +0,0477
+        #
+        #   dipecah per arah pada varian simetris:
+        #     BUY  n=673  E=+0,1411  t=+2,07   <- semua edge ada di sini
+        #     SELL n=520  E=-0,0151  t=-0,20   <- tidak ada edge
+        #
+        # Sisi sell tidak punya edge; menambahkannya hanya mengencerkan
+        # sisi buy dengan 520 trade ber-expectancy nol. Asimetri ini tanpa
+        # sengaja menyaringnya, jadi DIBIARKAN sebagai keputusan sadar.
+        #
+        # KONSEKUENSI: bukti sistem ini bias ke rezim emas NAIK (data Apr
+        # 2025 - Sep 2026, $3.200 -> $4.400). Di bear market panjang sistem
+        # akan jarang memberi sinyal. Lihat docs/39.
         if row.mom_24 > row.mom_24_q85:
             size_tier = "full"
         elif row.mom_24 > row.mom_24_q85 * 0.5:

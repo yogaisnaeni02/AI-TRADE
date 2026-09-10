@@ -287,8 +287,19 @@ class TradingBot:
             if row["mom_24"] <= row["mom_24_q85"]:
                 kurang.append(f"momentum ({row['mom_24']:.1f}<{row['mom_24_q85']:.1f})")
         if pd.notna(row.get("atr_percentile")):
-            if not (0.30 <= row["atr_percentile"] <= 0.85):
-                kurang.append(f"ATR {row['atr_percentile']:.2f}")
+            # Ambang dibaca dari RuleEngine, BUKAN ditulis ulang di sini.
+            #
+            # DIPERBAIKI 10 Sep 2026: sebelumnya 0,30-0,85 di-hardcode,
+            # padahal gate sesungguhnya sudah dilonggarkan ke 0,20-0,95.
+            # Heartbeat jadi melaporkan "belum: ATR 0,25" untuk bar yang
+            # sebenarnya LOLOS gate - hanya salah lapor, tidak memblokir
+            # trade, tapi persis jenis kebohongan yang bikin pemilik ragu
+            # apakah botnya jalan.
+            if not (self.rules.atr_lo <= row["atr_percentile"] <= self.rules.atr_hi):
+                kurang.append(
+                    f"ATR {row['atr_percentile']:.2f} "
+                    f"(butuh {self.rules.atr_lo:.2f}-{self.rules.atr_hi:.2f})"
+                )
         if row.get("trend_htf") == "ranging":
             kurang.append("HTF ranging")
         elif pd.notna(row.get("fib_position")):
