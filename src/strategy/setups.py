@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal, Optional, Sequence
 
 import pandas as pd
 import yaml
@@ -50,7 +50,12 @@ class Signal:
 
 
 class RuleEngine:
-    def __init__(self, config: Optional[dict] = None):
+    def __init__(
+        self,
+        config: Optional[dict] = None,
+        active_setups: Optional[Sequence[str]] = None,
+        momentum_sessions: Optional[Sequence[str]] = None,
+    ):
         self.cfg = config or load_config()
         d = self.cfg["trade_distances"]
         self.sl_min = d["sl_min_points"]
@@ -60,6 +65,36 @@ class RuleEngine:
         self.atr_mult = d["atr_sl_multiplier"]
         self.point = self.cfg["symbol"]["point"]
         self.spread = self.cfg["costs"]["spread_points"]
+
+        # Setup mana yang benar-benar dijalankan.
+        #
+        # BUG YANG DIPERBAIKI (10 Sep 2026): sebelumnya generate() selalu
+        # mencoba SEMUA detektor berurutan dengan `break` pada match
+        # pertama, dan _ny_vol_window ada di urutan pertama meski sudah
+        # dinonaktifkan di config. Karena skor minimumnya sama dengan
+        # min_score bot, ia selalu menang duluan, momentum_fib tidak pernah
+        # dievaluasi di bar itu, lalu sinyalnya dibuang senyap oleh bot
+        # karena setup-nya tidak aktif. Sekarang setup nonaktif tidak
+        # pernah dipanggil sama sekali.
+        self.active_setups = tuple(
+            active_setups
+            if active_setups is not None
+            else self.cfg.get("active_setups", ["momentum_fib"])
+        )
+
+        # Sesi mana yang boleh ditradingkan momentum_fib.
+        #
+        # Dibuat bisa dikonfigurasi (10 Sep 2026) karena ranking sesi yang
+        # dulu di-hardcode diukur pada data yang labelnya meleset 7 jam —
+        # lihat docs/27-AUDIT-TEMUAN.md bagian 1. Angka lama tidak berlaku
+        # dan sesi harus diukur ulang dari awal. None = semua sesi (24 jam).
+        cfg_sessions = self.cfg.get("momentum_sessions", None)
+        if momentum_sessions is not None:
+            self.momentum_sessions: Optional[tuple[str, ...]] = tuple(momentum_sessions)
+        elif cfg_sessions is not None:
+            self.momentum_sessions = tuple(cfg_sessions)
+        else:
+            self.momentum_sessions = None
 
     # -- helper ----------------------------------------------------------
 
@@ -268,15 +303,21 @@ class RuleEngine:
         if any(not hasattr(row, f) or pd.isna(getattr(row, f)) for f in need):
             return None
 
-        # Sesi yang terbukti menguntungkan untuk momentum (uji per sesi,
-        # winrate vs breakeven 25,41%):
-        #   ny_afternoon +5,45% | london_ny +4,84% | rollover +3,26%
-        #   asia -3,03% | london_open -3,39% | pre_ny -5,73%  <- ditolak
+        # Filter sesi, sekarang dari konfigurasi. None = semua sesi.
         #
-        # rollover ditambahkan (9 Sep 2026) untuk memperpendek jeda tunggu:
-        # menutupi jam 19:30-06:00 WIB (10,5 jam), bukan cuma 19:30-04:00.
-        # Dampak: WR turun tipis 30,77%->30,41%, tetap 5/6 kuartal positif.
-        if row.session not in ("ny_afternoon", "london_ny", "rollover"):
+        # RANKING SESI LAMA SUDAH DICABUT (10 Sep 2026). Komentar di sini
+        # dulu mencatat:
+        #     ny_afternoon +5,45% | london_ny +4,84% | rollover +3,26%
+        #     asia -3,03% | london_open -3,39% | pre_ny -5,73%
+        # Semua angka itu diukur pada data yang kolom time_utc-nya meleset
+        # 7 jam, sehingga LABEL sesinya salah sasaran: yang diberi label
+        # "ny_afternoon" sebenarnya sesi Tokyo, dan sesi London yang
+        # sesungguhnya berlabel "asia" lalu ditolak — tidak pernah diuji
+        # sekali pun. Lihat docs/27-AUDIT-TEMUAN.md bagian 1.
+        #
+        # Sesi harus diukur ulang dari nol dengan data yang sudah benar.
+        # Sampai itu selesai, default-nya semua sesi dibuka.
+        if self.momentum_sessions is not None and row.session not in self.momentum_sessions:
             return None
 
         # ATR dalam rentang normal adalah SYARAT, bukan bonus skor.
@@ -470,24 +511,43 @@ class RuleEngine:
         """
         signals: list[Signal] = []
 
+        # Hanya setup AKTIF yang dipanggil, dan urutannya tidak lagi
+        # menentukan siapa yang menang: semua kandidat di satu bar
+        # dikumpulkan, lalu skor tertinggi yang dipakai.
+        #
+        # Versi lama memakai first-match-wins dengan _ny_vol_window di urutan
+        # pertama meski setup itu nonaktif. Karena skor minimumnya sama
+        # dengan min_score bot, ia selalu menang, momentum_fib tidak pernah
+        # dievaluasi di bar tersebut, dan sinyalnya kemudian dibuang senyap
+        # oleh bot. Efeknya setup yang aktif kehilangan sebagian peluangnya
+        # tanpa jejak apa pun di log.
+        strict_detectors = [
+            (name, fn)
+            for name, fn in (
+                ("ny_vol_window", self._ny_vol_window),
+                ("momentum_fib", self._momentum_fib),
+                ("london_sweep", self._london_sweep),
+                ("ny_momentum", self._ny_momentum),
+            )
+            if name in self.active_setups
+        ]
+        run_frequent_micro = "frequent_micro" in self.active_setups
+
         for row in df.itertuples():
             ok_strict, _ = self._passes_gates(row, require_session=True)
 
-            if ok_strict:
-                found = False
-                for detector in (
-                    self._ny_vol_window,
-                    self._momentum_fib,
-                    self._london_sweep,
-                    self._ny_momentum,
-                ):
-                    sig = detector(row)
-                    if sig and sig.score >= min_score:
-                        signals.append(sig)
-                        found = True
-                        break
-                if found:
+            if ok_strict and strict_detectors:
+                candidates = [
+                    sig
+                    for _, detector in strict_detectors
+                    if (sig := detector(row)) and sig.score >= min_score
+                ]
+                if candidates:
+                    signals.append(max(candidates, key=lambda s: s.score))
                     continue
+
+            if not run_frequent_micro:
+                continue
 
             # frequent_micro didesain TANPA filter sesi (24 jam) - pakai
             # gerbang longgar (masih menjaga ATR minimum, spread, Jumat sore)
