@@ -323,13 +323,70 @@ class TradingBot:
         else:
             self.log(f"[status] {wib:%H:%M} WIB | sesi {row['session']} — semua syarat OK")
 
+    HB_TELEGRAM_JAM = 4          # kirim ringkasan tiap 4 jam
+
+    def _heartbeat_telegram(self, df) -> None:
+        """
+        Kabar berkala ke Telegram supaya KESENYAPAN bisa dibaca sebagai
+        masalah.
+
+        Kejadian nyata 11 Sep 2026: PC kantor macet, bot baru dinyalakan
+        ulang jam 15:37 WIB, dan 11 trade hari itu (5 di antaranya TP)
+        terlewat begitu saja. Tidak ada yang memberi tahu.
+
+        Prinsipnya dibalik: selama pesan datang tiap beberapa jam, sistem
+        hidup. Begitu berhenti, ada yang salah - dan itu terbaca dalam
+        hitungan menit, bukan jam.
+
+        Gagal kirim TIDAK pernah menghentikan bot.
+        """
+        try:
+            import time as _t
+            sekarang = _t.time()
+            if sekarang - getattr(self, "_hb_tg_terakhir", 0.0) < self.HB_TELEGRAM_JAM * 3600:
+                return
+            self._hb_tg_terakhir = sekarang
+
+            acc = mt5.account_info()
+            equity = acc.equity if acc else 0.0
+            n_pos = len(self.orders.get_positions()) if self.orders else 0
+            st = self.risk.state
+            baris = df.iloc[-1]
+            wib = pd.Timestamp(baris["time_utc"]) + pd.Timedelta(hours=7)
+
+            pesan = [
+                f"AI-TRADE hidup | {wib:%d %b %H:%M} WIB",
+                f"cfg {self.cfg_hash} | {self.mode} | {self.symbol}",
+                f"equity Rp {equity:,.0f} "
+                f"(DD {self.risk.current_drawdown_pct(equity):.1f}%)",
+                f"hari ini {st.day_trades}/{self.risk.max_daily_trades} trade, "
+                f"P/L Rp {st.day_pnl:,.0f}",
+                f"posisi terbuka {n_pos} | sesi {baris.get('session', '?')}",
+            ]
+            if st.halted:
+                pesan.append(f"HALT: {st.halt_reason}")
+            notifier.send(chr(10).join(pesan))
+        except Exception:  # noqa: BLE001
+            pass
+
     def process_bar(self, df: pd.DataFrame) -> None:
         self.manage_positions(df)
 
-        # Heartbeat tiap 12 bar M5 (1 jam)
+        # Heartbeat tiap 12 bar M5 (1 jam) ke log, dan tiap HB_TELEGRAM_JAM
+        # ke Telegram.
+        #
+        # Heartbeat Telegram bukan kenyamanan - ia mengubah "bot mati" dari
+        # sesuatu yang baru ketahuan berjam-jam kemudian menjadi sesuatu yang
+        # ketahuan dalam hitungan menit. Kejadian nyata 11 Sep 2026: PC macet,
+        # bot baru dinyalakan ulang jam 15:37, dan 11 trade (5 di antaranya TP)
+        # terlewat begitu saja.
+        #
+        # Prinsipnya dibalik: SENYAP berarti masalah. Selama pesan datang
+        # tiap beberapa jam, sistem hidup. Begitu berhenti, ada yang salah.
         self._bar_count = getattr(self, "_bar_count", 0) + 1
         if self._bar_count % 12 == 1:
             self._log_heartbeat(df)
+            self._heartbeat_telegram(df)
 
         if self.stop_requested():
             self.log("File STOP terdeteksi — tidak ada entry baru.")
@@ -540,6 +597,21 @@ class TradingBot:
         self.risk.state.peak_equity = max(self.risk.state.peak_equity, acc.equity)
         self.risk.refresh_from_journal(datetime.now())
         self.risk.save_state()
+
+        # Kabari bahwa bot benar-benar mulai. Bersama heartbeat berkala dan
+        # notifikasi saat berhenti, ini membuat status bot terbaca dari HP
+        # tanpa perlu remote ke PC.
+        try:
+            notifier.send(
+                chr(10).join([
+                    f"AI-TRADE START | {datetime.now():%d %b %H:%M} WIB",
+                    f"cfg {self.cfg_hash} | {self.mode} | {self.symbol}",
+                    f"akun {acc.login} ({'DEMO' if is_demo else 'REAL'})",
+                    f"equity Rp {acc.equity:,.0f}",
+                ])
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
         if self.risk.state.halted:
             self.log(f"!! Sistem dalam status HALT: {self.risk.state.halt_reason}")

@@ -23,6 +23,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
+import os
+
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -30,11 +32,31 @@ CONFIG_PATH = ROOT / "config" / "settings.yaml"
 
 
 def _load_telegram_config() -> tuple[Optional[str], Optional[str]]:
+    """
+    Ambil kredensial Telegram. Variabel lingkungan didahulukan.
+
+    config/settings.yaml IKUT GIT, jadi menaruh token di sana berarti
+    token itu ter-push ke repo begitu diisi. Variabel lingkungan tidak
+    ikut ke mana-mana:
+
+        setx AI_TRADE_TG_TOKEN   "123456:ABC..."     (Windows, sekali saja)
+        setx AI_TRADE_TG_CHAT_ID "987654321"
+
+    Lalu buka jendela CMD baru - setx hanya berlaku untuk proses baru.
+
+    Nilai di settings.yaml tetap dibaca sebagai cadangan agar setup lama
+    tidak mendadak berhenti bekerja.
+    """
+    token = os.environ.get("AI_TRADE_TG_TOKEN")
+    chat_id = os.environ.get("AI_TRADE_TG_CHAT_ID")
+    if token and chat_id:
+        return str(token), str(chat_id)
+
     try:
         with open(CONFIG_PATH, encoding="utf-8") as f:
             cfg = yaml.safe_load(f)
         tg = cfg.get("telegram", {})
-        token, chat_id = tg.get("bot_token"), tg.get("chat_id")
+        token, chat_id = token or tg.get("bot_token"), chat_id or tg.get("chat_id")
         if not token or not chat_id:
             return None, None
         return str(token), str(chat_id)
