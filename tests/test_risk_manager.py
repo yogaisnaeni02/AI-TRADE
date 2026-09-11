@@ -29,11 +29,22 @@ NOW = datetime(2026, 9, 10, 12, 0, 0)
 EQUITY = 5_000_000.0
 
 # Argumen check() yang selalu lolos, agar tes mengisolasi satu batas saja.
+#
+# SEMUA angka diturunkan dari config, tidak ada yang di-hardcode. Tes ini
+# sempat pecah saat daily.max_trades dinaikkan 6 -> 12 karena angkanya
+# dikunci di sini. Suite tes harus ikut berubah saat config berubah,
+# bukan menghalangi perubahannya.
+_probe = RiskManager()
+_d = _probe.cfg["trade_distances"]
+SL_POINTS = float(_d["sl_typical_points"])
+TP_POINTS = SL_POINTS * float(_d["min_rr_ratio"])
+SPREAD = float(_probe.cfg["costs"]["spread_points"])
+
 BASE = dict(
     equity=EQUITY,
-    sl_points=4000,
-    tp_points=12000,
-    spread_points=260,
+    sl_points=SL_POINTS,
+    tp_points=TP_POINTS,
+    spread_points=SPREAD,
     open_positions=0,
 )
 
@@ -109,34 +120,46 @@ def test_corrupt_rows_are_skipped(tmp: Path) -> None:
 
 
 def test_consecutive_losses_blocks_entry(tmp: Path) -> None:
+    """Jumlah loss beruntun diambil dari config."""
+    batas = make_manager(tmp, []).max_consec_losses
     rm = make_manager(tmp, [
-        ("2026-09-10T09:00:00", -30_000),
-        ("2026-09-10T10:00:00", -30_000),
-        ("2026-09-10T11:00:00", -30_000),
+        (f"2026-09-10T{9 + i // 4:02d}:{(i % 4) * 15:02d}:00", -30_000)
+        for i in range(batas)
     ])
     d = rm.check(now=NOW, **BASE)
-    assert not d.allowed, d.reason
+    assert not d.allowed, f"{batas} loss beruntun seharusnya memblokir: {d.reason}"
     assert "loss beruntun" in d.reason, d.reason
 
 
 def test_daily_loss_limit_blocks_entry(tmp: Path) -> None:
-    # 4% dari 5.000.000 = 200.000. Dua loss 150.000 menembusnya,
-    # tanpa menyentuh batas 3 loss beruntun.
+    """Batas rugi harian dari config, dan jumlah trade dijaga tetap di
+    bawah batas loss beruntun agar yang diuji benar-benar batas rugi."""
+    rm0 = make_manager(tmp, [])
+    ambang = EQUITY * rm0.max_daily_loss_pct / 100.0
+    n = max(1, rm0.max_consec_losses - 1)          # jangan picu loss beruntun
+    per_trade = -(ambang / n) * 1.1                # 10% menembus ambang
     rm = make_manager(tmp, [
-        ("2026-09-10T09:00:00", -150_000),
-        ("2026-09-10T10:00:00", -150_000),
+        (f"2026-09-10T{9 + i:02d}:00:00", per_trade) for i in range(n)
     ])
     d = rm.check(now=NOW, **BASE)
-    assert not d.allowed, d.reason
+    assert not d.allowed, f"rugi {ambang:,.0f} seharusnya memblokir: {d.reason}"
     assert "harian" in d.reason, d.reason
 
 
 def test_daily_trade_count_blocks_entry(tmp: Path) -> None:
+    """Jumlah trade diambil dari config, bukan di-hardcode.
+
+    Tes ini sempat gagal saat daily.max_trades dinaikkan 6 -> 12 karena
+    angkanya dikunci di tes. Sekarang ia membaca batas yang berlaku,
+    sehingga tetap sahih berapa pun nilainya."""
+    probe = make_manager(tmp, [])
+    batas = probe.max_daily_trades
     rm = make_manager(tmp, [
-        (f"2026-09-10T{9 + i:02d}:00:00", +10_000) for i in range(6)
+        (f"2026-09-10T{9 + i // 4:02d}:{(i % 4) * 15:02d}:00", +10_000)
+        for i in range(batas)
     ])
     d = rm.check(now=NOW, **BASE)
-    assert not d.allowed, d.reason
+    assert not d.allowed, f"batas {batas} trade/hari seharusnya memblokir: {d.reason}"
     assert "trade/hari" in d.reason, d.reason
 
 
