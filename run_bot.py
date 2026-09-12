@@ -33,7 +33,15 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--advisor", action="store_true", help="mode sinyal saja")
     ap.add_argument("--check", action="store_true", help="cek koneksi lalu keluar")
-    ap.add_argument("--poll", type=int, default=10, help="interval polling (detik)")
+    ap.add_argument(
+        "--poll", type=int, default=3,
+        help=(
+            "interval polling (detik). DIUBAH dari 10 -> 3 (13 Sep 2026) "
+            "atas permintaan pemilik untuk deteksi bar baru lebih cepat. "
+            "Satu siklus build_frame() makan ~1 detik; nilai di bawah 2 "
+            "berisiko siklus saling tumpuk saat MT5/network melambat."
+        ),
+    )
     ap.add_argument(
         "--varian", default=None,
         help="preset dari config/variants.yaml (kosong = settings.yaml apa adanya)",
@@ -53,6 +61,11 @@ def main() -> int:
         from src.variants import format_table
         print(format_table())
         return 0
+
+    if args.poll < 2:
+        print(f"!! --poll {args.poll} sangat agresif — satu siklus build_frame()")
+        print("   makan ~1 detik, jadi risiko siklus saling tumpuk saat MT5")
+        print("   atau jaringan melambat. Tetap dijalankan sesuai permintaan.")
 
     bot = TradingBot(variant=args.varian)
     bot.allow_real = args.allow_real
