@@ -16,7 +16,7 @@ from typing import Literal, Optional
 
 import MetaTrader5 as mt5
 
-MAGIC = 20260909  # penanda order milik sistem ini
+MAGIC = 20260909  # magic bawaan (varian "baseline") - lihat config/variants.yaml
 
 
 @dataclass
@@ -30,11 +30,16 @@ class OrderResult:
 
 
 class OrderManager:
-    def __init__(self, gateway, deviation_points: int = 50):
+    def __init__(self, gateway, deviation_points: int = 50, magic: int = MAGIC):
         self.gw = gateway
         self.symbol = gateway.symbol
         self.deviation = deviation_points
         self.point = gateway.config["symbol"]["point"]
+        # Magic per VARIAN (config/variants.yaml), bukan konstanta tunggal.
+        # Memungkinkan beberapa varian berjalan berdampingan di akun yang
+        # sama tanpa posisi/journal-nya bercampur. Default = MAGIC lama
+        # supaya kode yang belum memberi argumen ini tetap berperilaku sama.
+        self.magic = magic
 
     # -- helper ----------------------------------------------------------
 
@@ -103,7 +108,7 @@ class OrderManager:
             "sl": sl,
             "tp": tp,
             "deviation": self.deviation,
-            "magic": MAGIC,
+            "magic": self.magic,
             "comment": comment[:31],  # MT5 membatasi panjang komentar
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": self._filling_mode(),
@@ -161,7 +166,7 @@ class OrderManager:
 
             positions = mt5.positions_get(symbol=self.symbol) or []
             pos = next(
-                (p for p in positions if p.ticket == ticket or p.magic == MAGIC),
+                (p for p in positions if p.ticket == ticket or p.magic == self.magic),
                 None,
             )
             if pos is None:
@@ -232,7 +237,7 @@ class OrderManager:
             "position": ticket,
             "price": price,
             "deviation": self.deviation,
-            "magic": MAGIC,
+            "magic": self.magic,
             "comment": "close",
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": self._filling_mode(),
@@ -249,7 +254,7 @@ class OrderManager:
 
     def get_positions(self) -> list:
         """Hanya posisi milik sistem ini (ditandai magic number)."""
-        return [p for p in (mt5.positions_get(symbol=self.symbol) or []) if p.magic == MAGIC]
+        return [p for p in (mt5.positions_get(symbol=self.symbol) or []) if p.magic == self.magic]
 
     def close_all(self) -> list[OrderResult]:
         return [self.close_position(p.ticket) for p in self.get_positions()]

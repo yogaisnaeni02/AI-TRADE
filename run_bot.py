@@ -2,10 +2,17 @@
 Runner bot trading.
 
 Pemakaian:
-    python run_bot.py              # jalankan sesuai config
+    python run_bot.py              # jalankan sesuai config apa adanya
+    python run_bot.py --varian konfluensi   # jalankan preset bernama
+    python run_bot.py --daftar-varian       # lihat semua preset tersedia
     python run_bot.py --advisor    # paksa mode ADVISOR (sinyal saja)
     python run_bot.py --check      # cek koneksi & konfigurasi, lalu keluar
     python run_bot.py --allow-real # izinkan EXECUTOR di akun REAL (sengaja)
+
+Tanpa --varian, bot memakai settings.yaml APA ADANYA - perilaku lama,
+tidak berubah. --varian memuat preset dari config/variants.yaml dengan
+magic number sendiri, sehingga beberapa varian bisa berjalan berdampingan
+di akun demo yang sama tanpa posisi/journal-nya bercampur.
 
 Tanpa --allow-real, bot MENOLAK jalan bila mendeteksi akun real di mode
 EXECUTOR. Itu disengaja: basis bukti strategi ini belum memenuhi ambang
@@ -28,13 +35,26 @@ def main() -> int:
     ap.add_argument("--check", action="store_true", help="cek koneksi lalu keluar")
     ap.add_argument("--poll", type=int, default=10, help="interval polling (detik)")
     ap.add_argument(
+        "--varian", default=None,
+        help="preset dari config/variants.yaml (kosong = settings.yaml apa adanya)",
+    )
+    ap.add_argument(
+        "--daftar-varian", action="store_true",
+        help="tampilkan semua varian terdaftar, lalu keluar",
+    )
+    ap.add_argument(
         "--allow-real",
         action="store_true",
         help="izinkan EXECUTOR di akun REAL (tanpa ini bot berhenti)",
     )
     args = ap.parse_args()
 
-    bot = TradingBot()
+    if args.daftar_varian:
+        from src.variants import format_table
+        print(format_table())
+        return 0
+
+    bot = TradingBot(variant=args.varian)
     bot.allow_real = args.allow_real
     if args.advisor:
         bot.mode = "ADVISOR"
@@ -52,6 +72,7 @@ def main() -> int:
         print("=" * 58)
         print("PEMERIKSAAN SISTEM")
         print("=" * 58)
+        print(f"  Varian        : {bot.variant_name}  (magic {bot._magic})")
         print(f"  Akun          : {acc.login} @ {acc.server}")
         print(f"  Tipe          : {'DEMO' if acc.trade_mode == 0 else 'REAL'}")
         print(f"  Equity        : Rp {acc.equity:,.0f}")

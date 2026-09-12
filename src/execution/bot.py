@@ -54,8 +54,17 @@ class TradingBot:
         min_score: int = 5,
         allowed_setups: Optional[tuple[str, ...]] = None,
         max_score: int = 99,
+        variant: Optional[str] = None,
     ):
-        self.cfg = config or load_config()
+        base_cfg = config or load_config()
+
+        # Varian (config/variants.yaml): satu nama -> kombinasi fitur +
+        # magic number sendiri. variant=None berarti config dasar apa
+        # adanya dengan magic bawaan - perilaku LAMA, tidak berubah.
+        from ..variants import resolve as resolve_variant
+
+        self.cfg, self._magic, self._variant_meta = resolve_variant(variant, base_cfg)
+        self.variant_name = variant or "baseline"
 
         # Parameter operasional dibaca dari config agar backtest dan live
         # memakai angka yang sama persis.
@@ -552,7 +561,7 @@ class TradingBot:
             return
 
         self.gw.connect()
-        self.orders = OrderManager(self.gw)
+        self.orders = OrderManager(self.gw, magic=self._magic)
 
         acc = mt5.account_info()
         is_demo = acc.trade_mode == 0

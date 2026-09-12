@@ -1,0 +1,109 @@
+# Varian sistem — preset bernama untuk memilih dan membandingkan fitur.
+#
+# MASALAH YANG DISELESAIKAN
+# -------------------------
+# Sistem ini punya beberapa fitur yang masing-masing punya flag sendiri
+# (confluence_filter, allow_sell, dst) tersebar di settings.yaml. Untuk
+# menjalankan atau membandingkan satu kombinasi tertentu, sebelumnya harus
+# mengedit settings.yaml manual — mudah salah, dan tidak ada cara cepat
+# membandingkan "yang mana lebih baik" tanpa membaca kode.
+#
+# Tiap entri di sini adalah SATU KOMBINASI bernama. Semuanya override
+# kecil di atas settings.yaml dasar — tidak menduplikasi seluruh config.
+#
+# CARA PAKAI
+# ----------
+#   python run_bot.py --varian konfluensi
+#   python backtest/bandingkan_varian.py                 # semua varian
+#   python backtest/bandingkan_varian.py --varian baseline konfluensi
+#
+# MAGIC NUMBER per varian supaya bisa jalan BERDAMPINGAN di akun yang sama
+# tanpa bercampur di journal/dashboard. Basis 20260909 (sistem ini),
+# +N per varian. JANGAN mengubah magic varian yang sudah pernah dipakai
+# live — riwayat trade lama akan salah terhubung.
+#
+# Status "terverifikasi" merujuk ke dokumen yang mengukurnya. Sebelum
+# memindahkan status apa pun ke "aktif produksi", baca dokumennya dulu.
+
+# CATATAN PENTING: settings.yaml itu sendiri BUKAN netral. Sejak eksperimen
+# dua-arah dimulai (11 Sep 2026), settings.yaml dasar sudah punya
+# `momentum_fib.allow_sell: true` tertulis langsung di sana — bukan lewat
+# varian. Supaya nama "baseline" benar-benar berarti "BUY saja, tanpa fitur
+# tambahan" dan tidak diam-diam ikut hanyut saat settings.yaml berubah,
+# baseline di sini SECARA EKSPLISIT me-reset setiap flag fitur ke nilai
+# ilmiahnya (mati), bukan override: {}. Setiap varian lain juga menyatakan
+# NILAI PENUH tiap flag yang relevan, bukan cuma yang diaktifkannya —
+# supaya satu varian tidak diam-diam mewarisi flag varian lain lewat
+# settings.yaml.
+
+varian:
+
+  baseline:
+    magic: 20260909
+    deskripsi: >
+      BUY searah momentum, tanpa filter tambahan. Definisi ilmiah "polos" -
+      dipertahankan tetap sama walau settings.yaml dasar berubah.
+    status: forward-test-aktif
+    override:
+      momentum_fib:
+        allow_sell: false
+        confluence_filter: false
+
+  konfluensi:
+    magic: 20260910
+    deskripsi: >
+      Baseline + filter candle searah + ADX>25 + tren M5 tidak melawan.
+      Satu-satunya kandidat yang lolos holdout tersegel DAN ambang t~3,0.
+    status: terverifikasi-belum-produksi
+    dokumen: docs/36-UJI-GABUNGAN-TEKNIK.md, docs/38-PERBANDINGAN-RISET-PARALEL.md
+    hasil_backtest:
+      n: 519
+      E_R: 0.2510
+      t: 3.14
+      holdout_E_R: 0.2805
+    override:
+      momentum_fib:
+        allow_sell: false
+        confluence_filter: true
+
+  dua_arah:
+    magic: 20260911
+    deskripsi: >
+      Baseline + sisi SELL diaktifkan. Backtest bilang sell tidak punya
+      edge (empat definisi rezim diuji, semua memperburuk) - dinyalakan
+      sebagai eksperimen DEMO karena rezim turun saat ini jarang muncul
+      di data historis. Ini VARIAN YANG SAMA dengan yang sedang berjalan
+      lewat settings.yaml (allow_sell: true) - didaftarkan di sini supaya
+      bisa dibandingkan lewat nama, bukan lewat membaca settings.yaml.
+    status: eksperimen-demo-aktif
+    dokumen: docs/43-KENAPA-CUMA-BUY-DAN-MOMEN-SELL.md
+    peringatan: >
+      JANGAN bawa ke akun real. Sisi sell belum lolos gerbangnya sendiri
+      (docs/29 bagian 9).
+    override:
+      momentum_fib:
+        allow_sell: true
+        confluence_filter: false
+
+  dua_arah_konfluensi:
+    magic: 20260912
+    deskripsi: >
+      Gabungan dua_arah + konfluensi. BELUM diukur sebagai kombinasi -
+      konfluensi diverifikasi hanya untuk BUY (docs/36). Menjalankan ini
+      berarti menguji kombinasi baru, bukan mengulang hasil yang ada.
+    status: belum-diukur
+    override:
+      momentum_fib:
+        allow_sell: true
+        confluence_filter: true
+
+  ml_walkforward:
+    magic: 20260913
+    deskripsi: >
+      Baseline + filter ML walk-forward (buang 25% probabilitas TP
+      terendah). AUC 0,56 out-of-sample, lolos stabilitas seed dan sapuan
+      hiperparameter (docs/46). BELUM diintegrasikan ke RuleEngine -
+      masih di scripts/ml_walk_forward.py sebagai riset berdiri sendiri.
+    status: riset-belum-diintegrasikan
+    dokumen: docs/46-VERIFIKASI-ML-WALK-FORWARD.md
+    override: {}   # tidak bisa diaktifkan lewat config - lihat status

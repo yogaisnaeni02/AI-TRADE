@@ -20,14 +20,33 @@ ROOT = Path(__file__).resolve().parents[2]
 LOG_DIR = ROOT / "logs"
 TRADES_CSV = LOG_DIR / "trades.csv"
 
-MAGIC = 20260909
+MAGIC = 20260909  # magic bawaan (varian "baseline") - lihat config/variants.yaml
 
 FIELDS = [
     "ticket", "symbol", "direction", "lot",
     "entry_time", "entry_price", "exit_time", "exit_price",
     "pnl_idr", "commission", "swap", "net_idr",
-    "r_multiple", "duration_min", "comment",
+    "r_multiple", "duration_min", "comment", "magic", "varian",
 ]
+
+
+def _known_magics() -> dict[int, str]:
+    """Magic -> nama varian, dari config/variants.yaml plus MAGIC bawaan.
+
+    Dipakai supaya trade dari SEMUA varian tercatat di journal, bukan
+    hanya yang bermagic MAGIC lama. Kalau variants.yaml tidak ada atau
+    kosong, hasilnya {MAGIC: "baseline"} - perilaku lama tidak berubah.
+    """
+    out = {MAGIC: "baseline"}
+    try:
+        from ..variants import list_variants
+        for name, meta in list_variants().items():
+            m = meta.get("magic")
+            if m is not None:
+                out[int(m)] = name
+    except Exception:  # noqa: BLE001
+        pass
+    return out
 
 
 def _load_existing_tickets() -> set[int]:
@@ -98,13 +117,19 @@ def sync_closed_trades(days_back: int = 30, risk_per_trade_idr: float = 0.0,
     # Perbaikan: kelompokkan dulu per position_id tanpa filter, baru saring
     # posisi mana yang MILIK BOT berdasarkan apakah SALAH SATU deal-nya
     # (biasanya entry) bermagic milik sistem ini.
+    #
+    # DIPERLUAS (varian): "milik sistem ini" sekarang berarti magic APA
+    # PUN yang terdaftar di config/variants.yaml, bukan cuma MAGIC lama.
+    # Tanpa ini, trade dari varian selain baseline tidak akan pernah
+    # tercatat - journal akan diam-diam kehilangan sebagian forward test.
+    known = _known_magics()
     all_positions: dict[int, list] = {}
     for d in deals:
         all_positions.setdefault(d.position_id, []).append(d)
 
     positions = {
         pos_id: dl for pos_id, dl in all_positions.items()
-        if any(d.magic == MAGIC for d in dl)
+        if any(d.magic in known for d in dl)
     }
 
     existing = _load_existing_tickets()
@@ -139,6 +164,15 @@ def sync_closed_trades(days_back: int = 30, risk_per_trade_idr: float = 0.0,
             except Exception:  # noqa: BLE001
                 risk_idr = 0.0
 
+        # Magic dari deal ENTRY, bukan exit - exit bisa bermagic 0 bila
+        # posisi ditutup manual (lihat catatan bug di atas). "varian"
+        # tidak dikenal (magic lama yang sudah tidak ada di variants.yaml)
+        # dicatat sebagai "?<magic>" supaya tetap tertelusuri, bukan hilang.
+        magic = entry.magic if entry.magic in known else next(
+            (d.magic for d in dl if d.magic in known), entry.magic
+        )
+        varian = known.get(magic, f"?{magic}")
+
         new_rows.append({
             "ticket": pos_id,
             "symbol": entry.symbol,
@@ -155,12 +189,15 @@ def sync_closed_trades(days_back: int = 30, risk_per_trade_idr: float = 0.0,
             "r_multiple": round(net / risk_per_trade_idr, 3) if risk_per_trade_idr else "",
             "duration_min": round(duration, 1),
             "comment": entry.comment,
+            "magic": magic,
+            "varian": varian,
         })
 
     if not new_rows:
         return 0
 
     new_rows.sort(key=lambda r: r["entry_time"])
+    _migrate_schema_if_needed()
     write_header = not TRADES_CSV.exists()
 
     with open(TRADES_CSV, "a", encoding="utf-8", newline="") as f:
@@ -170,6 +207,34 @@ def sync_closed_trades(days_back: int = 30, risk_per_trade_idr: float = 0.0,
         w.writerows(new_rows)
 
     return len(new_rows)
+
+
+def _migrate_schema_if_needed() -> None:
+    """Tulis ulang trades.csv bila kolom lama (tanpa magic/varian) dipakai.
+
+    File lama sebelum kolom ini ditambahkan tidak punya "magic"/"varian"
+    di header. Tanpa migrasi, DictWriter menolak menulis baris baru yang
+    field-nya tidak cocok dengan header lama. Baris lama diberi magic
+    bawaan (MAGIC) dan varian "baseline" - benar untuk semua trade yang
+    tercatat sebelum sistem varian ada.
+    """
+    if not TRADES_CSV.exists():
+        return
+    with open(TRADES_CSV, encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        header = reader.fieldnames or []
+        if "magic" in header and "varian" in header:
+            return  # sudah skema baru
+        rows = list(reader)
+
+    for r in rows:
+        r.setdefault("magic", MAGIC)
+        r.setdefault("varian", "baseline")
+
+    with open(TRADES_CSV, "w", encoding="utf-8", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=FIELDS)
+        w.writeheader()
+        w.writerows(rows)
 
 
 def summary() -> dict:
