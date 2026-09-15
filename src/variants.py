@@ -71,6 +71,25 @@ def apply_variant(base_config: dict, name: str) -> tuple[dict, int, dict]:
     return merged, magic, meta
 
 
+def apply_risk_override(base_risk: dict, name: Optional[str]) -> dict:
+    """Terapkan `override_risk` varian ke atas risk_limits.yaml.
+
+    Dipisah dari apply_variant() karena settings.yaml dan risk_limits.yaml
+    adalah dua file berbeda yang dimuat terpisah. Varian yang hanya
+    mengubah batas risiko (mis. max_open_positions) memakai kunci
+    `override_risk`, bukan `override`.
+
+    name=None -> risk apa adanya, tidak disentuh.
+    """
+    if name is None:
+        return base_risk
+    meta = get_variant(name)
+    override = meta.get("override_risk") or {}
+    if not override:
+        return base_risk
+    return _deep_merge(base_risk, override)
+
+
 def resolve(name: Optional[str], base_config: Optional[dict] = None) -> tuple[dict, int, dict]:
     """Titik masuk utama.
 

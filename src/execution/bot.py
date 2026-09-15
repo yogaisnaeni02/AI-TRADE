@@ -61,17 +61,23 @@ class TradingBot:
         # Varian (config/variants.yaml): satu nama -> kombinasi fitur +
         # magic number sendiri. variant=None berarti config dasar apa
         # adanya dengan magic bawaan - perilaku LAMA, tidak berubah.
-        from ..variants import resolve as resolve_variant
+        from ..variants import apply_risk_override, resolve as resolve_variant
 
         self.cfg, self._magic, self._variant_meta = resolve_variant(variant, base_cfg)
         self.variant_name = variant or "baseline"
+
+        # Batas risiko juga bisa di-override per varian lewat `override_risk`
+        # (mis. max_open_positions). Dipisah dari `override` karena
+        # settings.yaml dan risk_limits.yaml adalah dua file berbeda.
+        from ..risk.manager import load_risk_config
+        risk_cfg = apply_risk_override(load_risk_config(), variant)
 
         # Parameter operasional dibaca dari config agar backtest dan live
         # memakai angka yang sama persis.
         pm = self.cfg.get("position_management", {})
         self.gw = MT5Gateway(self.cfg)
         self.rules = RuleEngine(self.cfg)
-        self.risk = RiskManager(self.cfg)
+        self.risk = RiskManager(self.cfg, risk=risk_cfg)
         self.orders: Optional[OrderManager] = None
 
         self.breakeven_at_r = (

@@ -111,33 +111,46 @@ weekly:
 
 global:
   max_drawdown_percent: 20.0  # MATIKAN SISTEM - butuh reset manual
-  # DINAIKKAN 2 -> 5 (15 Sep 2026) atas permintaan pemilik: multi posisi
-  # SEARAH (pyramiding) saat sinyal searah terus bermunculan.
+  # DIUKUR ULANG 15 Sep 2026 setelah engine backtest diperbaiki (lihat
+  # catatan LOOKAHEAD BIAS di backtest/engine.py::run). Nilai 2 terbaik:
+  #
+  #   maxpos  1 : n=1560  E[R]=+0,0477  equity akhir Rp 12,7 jt
+  #   maxpos  2 : n=1909  E[R]=+0,0673  equity akhir Rp 21,3 jt  <- TERBAIK
+  #   maxpos  3 : n=1968  E[R]=+0,0522  equity akhir Rp 11,7 jt
+  #   maxpos  5 : n= 585  E[R]=-0,1260  equity akhir MINUS (habis)
+  #   maxpos 10 : n= 501  E[R]=-0,1332  equity akhir MINUS (habis)
+  #
+  # Titik baliknya tajam di atas 3. Sebabnya bukan sinyal yang lebih lemah
+  # (skor posisi ke-2+ justru LEBIH TINGGI: 6,77-7,20 vs 6,57), melainkan
+  # KORELASI: jeda antar entry median hanya 5 menit, sehingga semua posisi
+  # masuk di harga hampir sama, SL-nya berdekatan, dan mereka kena SL
+  # BERSAMAAN. Terukur 119 kejadian tutup-bareng melibatkan 347 trade,
+  # total rugi Rp 17,9 juta. Posisi ke-10 kena SL 100% - tidak ada yang TP.
+  #
+  # Multi posisi searah tanpa syarat jarak = memperbesar SATU taruhan
+  # 5-10x, bukan diversifikasi.
+  #
+  # Untuk menguji maxpos 5 di demo tanpa mengganggu forward test ini,
+  # pakai varian `pyramid5` (config/variants.yaml) yang punya magic
+  # sendiri: python run_bot.py --varian pyramid5
   #
   # KOREKSI ATAS KOMENTAR LAMA: nilai 2 dulu dijelaskan sebagai "satu posisi
   # per arah". Itu TIDAK PERNAH benar - risk manager hanya menghitung TOTAL
   # posisi, tidak memisahkan arah. Akibatnya 2 posisi SEARAH juga lolos, dan
   # itulah yang terjadi 14 Sep 2026 (5 pasang posisi dobel dalam 4-7 detik).
   #
-  # Sekarang aturannya dibuat eksplisit di kode, bukan diasumsikan di
+  # Sekarang aturan arah dibuat eksplisit di kode, bukan diasumsikan di
   # komentar: `RiskManager.check()` menolak sinyal yang BERLAWANAN arah
-  # dengan posisi yang sudah terbuka. Jadi 5 = maksimal 5 posisi SEARAH.
-  # Buy dan sell tidak akan pernah terbuka bersamaan dari setup yang sama.
+  # dengan posisi yang sudah terbuka. Jadi nilai di bawah = jumlah maksimum
+  # posisi SEARAH. Buy dan sell tidak akan pernah terbuka bersamaan dari
+  # setup yang sama.
   #
-  # KONSEKUENSI yang harus disadari (equity Rp 5,58 jt, SL maks 4500 pts):
+  # KONSEKUENSI (equity Rp 5,58 jt, SL maks 4500 pts):
   #   1 posisi kena SL -> Rp  78.676  (1,41%)
-  #   5 posisi kena SL -> Rp 393.381  (7,05%)
-  # Karena semua searah, mereka menang bareng dan kalah bareng - tidak ada
-  # diversifikasi. Rem yang menahan: batas rugi harian 4% (Rp 223.132)
-  # menyala SEBELUM 5 posisi sempat kena SL semua, sehingga 7,05% itu
-  # plafon teoretis, bukan yang realistis terjadi dalam satu hari.
-  #
-  # PERHATIAN: backtest/engine.py membaca nilai ini, tetapi backtest TIDAK
-  # mensimulasikan pyramiding dari sinyal berturut-turut dengan cara yang
-  # sama seperti live. Angka backtest tetap pembanding yang lebih ketat.
+  #   2 posisi kena SL -> Rp 157.352  (2,82%)
   #
   # KEMBALIKAN KE 1 sebelum akun real sampai pyramiding terbukti di demo.
-  max_open_positions: 5
+  max_open_positions: 2
 
 # Position sizing adaptif - lot lebih besar saat keyakinan sinyal tinggi.
 #

@@ -97,6 +97,33 @@ varian:
         allow_sell: true
         confluence_filter: true
 
+  pyramid5:
+    magic: 20260914
+    deskripsi: >
+      Multi posisi SEARAH sampai 5 bersamaan, tanpa syarat jarak harga.
+      Permintaan pemilik: jangan melewatkan momentum hanya karena posisi
+      sebelumnya masih terbuka.
+    status: eksperimen-demo-backtest-negatif
+    dokumen: docs/50-MULTI-POSISI-SEARAH.md
+    peringatan: >
+      BACKTEST NEGATIF. Pada data 516 hari, maxpos 5 membuat modal HABIS
+      (Rp 5,58 jt -> minus), E[R] -0,126. Dijalankan sebagai eksperimen
+      DEMO untuk melihat apakah perilaku live berbeda dari backtest -
+      BUKAN karena diperkirakan menguntungkan. JANGAN ke akun real.
+    hasil_backtest:
+      maxpos_1: {E_R: 0.0477, equity_akhir: 12731823}
+      maxpos_2: {E_R: 0.0673, equity_akhir: 21304756}
+      maxpos_3: {E_R: 0.0522, equity_akhir: 11714623}
+      maxpos_5: {E_R: -0.1260, equity_akhir: -2373}
+      maxpos_10: {E_R: -0.1332, equity_akhir: -140245}
+    override:
+      momentum_fib:
+        allow_sell: true
+        confluence_filter: false
+    override_risk:
+      global:
+        max_open_positions: 5
+
   ml_walkforward:
     magic: 20260913
     deskripsi: >

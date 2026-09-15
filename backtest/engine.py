@@ -362,16 +362,85 @@ class Backtester:
         slots = [-1] * max(1, self.max_open_positions)
         halted = False
 
+        # DIPERBAIKI 15 Sep 2026 — LOOKAHEAD BIAS pada multi-posisi.
+        #
+        # Versi lama menambahkan pnl ke `equity`, `day_pnl`, dan
+        # `consec_losses` SEGERA setelah tiap sinyal diproses, seolah trade
+        # itu langsung selesai. Dengan 1 posisi pada satu waktu itu tidak
+        # masalah - trade memang sudah tutup sebelum yang berikutnya dibuka.
+        #
+        # Begitu max_open_positions > 1, asumsi itu runtuh: beberapa posisi
+        # terbuka BERSAMAAN, tetapi engine tetap membukukan hasilnya di
+        # muka. Akibatnya:
+        #   - lot dihitung dari equity yang sudah memuat profit trade yang
+        #     di dunia nyata BELUM tutup (memakai informasi masa depan)
+        #   - day_pnl dan consec_losses diisi hasil trade yang belum selesai,
+        #     sehingga rem harian menyala pada waktu yang salah
+        #
+        # Terukur: batas rugi harian 4% tertembus di 96 hari padahal rem-nya
+        # seharusnya menghentikan trading hari itu, dan mengubah batas 4% ->
+        # 7% tidak mengubah hasil sama sekali (dua angka identik) - tanda
+        # rem itu memang tidak pernah benar-benar bekerja.
+        #
+        # Perbaikan: pnl baru dibukukan saat trade BENAR-BENAR tutup.
+        # `pending` menyimpan trade yang masih berjalan, diurutkan menurut
+        # bar penutupannya; sebelum tiap sinyal diproses, semua trade yang
+        # sudah tutup pada/bawah bar itu direalisasikan dulu.
+        pending: list[tuple[int, Trade]] = []
+
+        def realisasi(sampai_idx: int) -> bool:
+            """Bukukan trade yang sudah tutup pada/sebelum `sampai_idx`.
+
+            Mengembalikan True bila drawdown menyentuh ambang halt.
+            """
+            nonlocal equity, peak, day_pnl, day_trades, consec_losses
+            pending.sort(key=lambda x: x[0])
+            kena_halt = False
+            while pending and pending[0][0] <= sampai_idx:
+                exit_idx, tr = pending.pop(0)
+
+                equity += tr.pnl_idr
+                peak = max(peak, equity)
+                dd = (peak - equity) / peak * 100
+
+                day_pnl += tr.pnl_idr
+                day_trades += 1
+                consec_losses = consec_losses + 1 if tr.pnl_idr < 0 else 0
+
+                trades.append(tr)
+                curve.append(
+                    {"time": tr.exit_time, "equity": equity, "drawdown_pct": dd}
+                )
+                if dd >= self.max_dd:
+                    kena_halt = True
+            return kena_halt
+
         for _, sig in signals.iterrows():
             if halted:
                 break
 
-            day = pd.Timestamp(sig["time"]).date()
-            if day != current_day:
-                current_day, day_pnl, day_trades, consec_losses = day, 0.0, 0, 0
+            idx_now = int(sig["idx"])
+
+            # Realisasikan dulu semua trade yang sudah tutup sampai bar ini.
+            if realisasi(idx_now):
+                halted = True
+                break
+
+            # Reset counter harian saat hari sinyal berganti.
+            #
+            # Wajib terpisah dari reset di realisasi(): kalau hanya reset di
+            # sana, hari yang tidak punya satu pun trade tutup tidak pernah
+            # mereset counter, sehingga `consec_losses` dari hari sebelumnya
+            # ikut terbawa dan memblokir SELURUH sisa backtest. Terukur:
+            # tanpa ini backtest berhenti di 10 trade.
+            hari_sinyal = pd.Timestamp(sig["time"]).date()
+            if current_day is not None and hari_sinyal != current_day:
+                current_day = hari_sinyal
+                day_pnl, day_trades, consec_losses = 0.0, 0, 0
+            elif current_day is None:
+                current_day = hari_sinyal
 
             # Cari slot posisi yang sudah bebas di bar ini.
-            idx_now = int(sig["idx"])
             free = next((z for z, until in enumerate(slots) if idx_now > until), None)
             if free is None:
                 continue
@@ -390,22 +459,13 @@ class Backtester:
             if trade is None:
                 continue
 
-            equity += trade.pnl_idr
-            peak = max(peak, equity)
-            dd = (peak - equity) / peak * 100
+            exit_idx = idx_now + trade.bars_held + 1
+            slots[free] = exit_idx
+            pending.append((exit_idx, trade))
 
-            day_pnl += trade.pnl_idr
-            day_trades += 1
-            consec_losses = consec_losses + 1 if trade.pnl_idr < 0 else 0
-
-            slots[free] = idx_now + trade.bars_held + 1
-            trades.append(trade)
-            curve.append(
-                {"time": trade.exit_time, "equity": equity, "drawdown_pct": dd}
-            )
-
-            if dd >= self.max_dd:
-                halted = True
+        # Bukukan sisa trade yang masih terbuka di akhir data.
+        if not halted:
+            realisasi(10**18)
 
         trades_df = pd.DataFrame([t.to_dict() for t in trades]) if trades else pd.DataFrame()
         curve_df = pd.DataFrame(curve) if curve else pd.DataFrame()
