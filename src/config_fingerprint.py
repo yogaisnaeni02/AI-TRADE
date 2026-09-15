@@ -106,16 +106,38 @@ def fingerprint(settings: dict, risk: dict, min_score: int, length: int = 4) -> 
 
 
 def describe(settings: dict, risk: dict, min_score: int) -> str:
-    """Satu baris ringkas untuk log saat bot start."""
+    """Satu baris ringkas untuk log saat bot start.
+
+    Menampilkan juga fitur yang MEMBEDAKAN antar varian (autoclose,
+    confluence, loss_mode). Tanpa itu, dua varian yang kebetulan punya
+    maxpos sama terlihat identik di log - dan orang yang membaca log
+    (termasuk yang menulis kode ini) bisa salah menyimpulkan varian mana
+    yang sedang berjalan.
+    """
     c = signal_config(settings, risk, min_score)
     mf = c.get("settings.momentum_fib") or {}
-    return (
-        f"cfg={fingerprint(settings, risk, min_score)} "
-        f"setup={c.get('settings.active_setups')} "
-        f"min_score={min_score} "
-        f"atr={mf.get('atr_percentile_min')}-{mf.get('atr_percentile_max')} "
-        f"sell={mf.get('allow_sell', False)} "
-        f"rr={c.get('settings.trade_distances.min_rr_ratio')} "
-        f"risk={c.get('risk.per_trade.max_risk_percent')}% "
-        f"maxpos={c.get('risk.global.max_open_positions')}"
-    )
+    pm = settings.get("position_management", {}) or {}
+    dy = risk.get("daily", {}) or {}
+
+    bagian = [
+        f"cfg={fingerprint(settings, risk, min_score)}",
+        f"setup={c.get('settings.active_setups')}",
+        f"min_score={min_score}",
+        f"atr={mf.get('atr_percentile_min')}-{mf.get('atr_percentile_max')}",
+        f"sell={mf.get('allow_sell', False)}",
+        f"rr={c.get('settings.trade_distances.min_rr_ratio')}",
+        f"risk={c.get('risk.per_trade.max_risk_percent')}%",
+        f"maxpos={c.get('risk.global.max_open_positions')}",
+    ]
+
+    # Hanya ditampilkan bila AKTIF, supaya baris log tidak penuh nilai
+    # default yang tidak menambah informasi.
+    if mf.get("confluence_filter"):
+        bagian.append("konfluensi=ON")
+    drop = int(pm.get("autoclose_score_drop", 0) or 0)
+    if drop > 0:
+        bagian.append(f"autoclose=turun{drop}")
+    if str(dy.get("loss_mode", "trade")).lower() == "batch":
+        bagian.append(f"loss=batch/{dy.get('max_consecutive_loss_batches', 3)}")
+
+    return " ".join(bagian)

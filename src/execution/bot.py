@@ -663,7 +663,7 @@ class TradingBot:
         is_demo = acc.trade_mode == 0
 
         self.log("=" * 58)
-        self.log(f"BOT START — mode {self.mode}")
+        self.log(f"BOT START — mode {self.mode} — VARIAN: {self.variant_name}")
         self.log(f"Akun {acc.login} @ {acc.server} ({'DEMO' if is_demo else 'REAL'})")
         self.log(f"Equity Rp {acc.equity:,.0f} | simbol {self.symbol}")
         self.log(f"Setup: {self.allowed_setups} skor {self.min_score}-{self.max_score}")
