@@ -127,6 +127,24 @@ class TradingBot:
         with open(self.log_path, "a", encoding="utf-8") as f:
             f.write(line + "\n")
 
+    def _teks_rem_rugi(self) -> str:
+        """Teks rem rugi sesuai MODE YANG AKTIF.
+
+        Sebelumnya log selalu mencetak "N/M loss beruntun" apa pun modenya.
+        Pada varian ber-loss_mode "batch" itu menyesatkan: log menampilkan
+        "6/3 loss beruntun" (terlihat seperti sudah lewat batas dan bot
+        berhenti) padahal gerbang memakai penghitung BATCH yang saat itu
+        baru 2/3 dan tetap mengizinkan entry. Angka yang dicetak harus
+        angka yang benar-benar dipakai memutuskan.
+        """
+        st = self.risk.state
+        if self.risk.loss_mode == "batch":
+            return (
+                f"{st.consecutive_loss_batches}/{self.risk.max_consec_loss_batches}"
+                f" batch rugi ({st.consecutive_losses} posisi)"
+            )
+        return f"{st.consecutive_losses}/{self.risk.max_consec_losses} loss beruntun"
+
     def stop_requested(self) -> bool:
         return STOP_FILE.exists()
 
@@ -707,7 +725,7 @@ class TradingBot:
         self.log(
             f"Rem hari ini: {self.risk.state.day_trades}/{self.risk.max_daily_trades} trade"
             f" | P/L Rp {self.risk.state.day_pnl:,.0f}"
-            f" | {self.risk.state.consecutive_losses}/{self.risk.max_consec_losses} loss beruntun"
+            f" | {self._teks_rem_rugi()}"
             f" | puncak equity Rp {self.risk.state.peak_equity:,.0f}"
             f" (DD {self.risk.current_drawdown_pct(acc.equity):.1f}%)"
         )
@@ -783,8 +801,7 @@ class TradingBot:
                             self.log(
                                 f"  Rem: {self.risk.state.day_trades}/{self.risk.max_daily_trades} trade"
                                 f" | P/L Rp {self.risk.state.day_pnl:,.0f}"
-                                f" | {self.risk.state.consecutive_losses}/{self.risk.max_consec_losses}"
-                                " loss beruntun"
+                                f" | {self._teks_rem_rugi()}"
                             )
                     except Exception:  # noqa: BLE001
                         pass
