@@ -399,11 +399,17 @@ class TradingBot:
         if row.get("trend_htf") == "ranging":
             kurang.append("HTF ranging")
         elif pd.notna(row.get("fib_position")):
+            # Ambang dibaca dari RuleEngine, bukan ditulis ulang di sini.
+            #
+            # Dulu 0,75/0,25 di-hardcode, sehingga varian yang memakai
+            # ambang lain (autoclose_agresif & pyramid5 memakai 0,70/0,30)
+            # melaporkan angka yang SALAH di heartbeat - terlihat seperti
+            # sinyal ditolak oleh ambang yang sebenarnya tidak berlaku.
             fp = row["fib_position"]
-            if row["trend_htf"] == "uptrend" and fp <= 0.75:
-                kurang.append(f"fib {fp:.2f}<0.75")
-            elif row["trend_htf"] == "downtrend" and fp >= 0.25:
-                kurang.append(f"fib {fp:.2f}>0.25")
+            if row["trend_htf"] == "uptrend" and fp <= self.rules.fib_buy_min:
+                kurang.append(f"fib {fp:.2f}<{self.rules.fib_buy_min:.2f}")
+            elif row["trend_htf"] == "downtrend" and fp >= self.rules.fib_sell_max:
+                kurang.append(f"fib {fp:.2f}>{self.rules.fib_sell_max:.2f}")
 
         if kurang:
             self.log(
