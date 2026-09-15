@@ -242,6 +242,28 @@ varian:
       momentum_fib:
         allow_sell: true
         confluence_filter: false
+        # Gate fibonacci dilonggarkan 0,75/0,25 -> 0,70/0,30 atas permintaan
+        # pemilik, supaya sinyal lebih sering muncul.
+        #
+        # Gate ini penyaring TERBESAR: dari 86.309 bar bertren jelas, yang
+        # lolos naik dari 34,5% (0,75) ke 40,7% (0,70) - +18% peluang.
+        #
+        # DIUKUR, dan hasilnya HARUS dibaca hati-hati:
+        #   baseline           0,75/0,25 -> E[R] +0,1254  equity Rp 23,8 jt
+        #   baseline           0,70/0,30 -> E[R] +0,1054  equity Rp 22,8 jt
+        #   autoclose_agresif  0,75/0,25 -> E[R] -0,1086  equity MINUS
+        #   autoclose_agresif  0,70/0,30 -> E[R] -0,0910  equity MINUS
+        #
+        # Di varian agresif angkanya terlihat MEMBAIK, tetapi itu MENIPU:
+        # kedua-duanya kehabisan modal di pertengahan Agustus 2025 dan
+        # backtest berhenti di situ - tidak pernah sampai akhir periode.
+        # Yang terjadi bukan "lebih untung", melainkan "modal habis sedikit
+        # lebih lambat".
+        #
+        # Angka yang bisa dipercaya datang dari baseline yang berjalan
+        # penuh: di sana melonggarkan fib MEMPERBURUK (+0,1254 -> +0,1054).
+        fib_buy_min: 0.70
+        fib_sell_max: 0.30
       position_management:
         autoclose_score_drop: 15
     override_risk:

@@ -270,6 +270,16 @@ class RuleEngine:
         self.confluence_filter = bool(mf.get("confluence_filter", False))
         self.confluence_adx_min = float(mf.get("confluence_adx_min", 25.0))
 
+        # Ambang posisi Fibonacci. Default 0,75 / 0,25 = nilai yang berlaku
+        # sejak awal; dibuat bisa dikonfigurasi (15 Sep 2026) agar varian
+        # bisa melonggarkannya tanpa menyentuh kode.
+        #
+        # Ini penyaring TERBESAR di rantai sinyal - dari 86.309 bar bertren
+        # jelas, hanya 34,5% yang lolos gate ini. Melonggarkan ke 0,70/0,30
+        # menaikkannya ke 40,7% (+18% peluang).
+        self.fib_buy_min = float(mf.get("fib_buy_min", 0.75))
+        self.fib_sell_max = float(mf.get("fib_sell_max", 0.25))
+
     # -- helper ----------------------------------------------------------
 
     def _price_to_points(self, price_diff: float) -> float:
@@ -578,9 +588,16 @@ class RuleEngine:
         #
         # Perilaku BUY tidak berubah sama sekali: untuk buy, mom_arah =
         # +mom_24, identik dengan gate lama.
-        if row.trend_htf == "uptrend" and row.fib_position > 0.75:
+        # Ambang fib dibaca dari config (default 0,75 / 0,25 - nilai lama).
+        #
+        # Gate ini penyaring TERBESAR di seluruh rantai: dari 58,8% bar yang
+        # trennya jelas, hanya 34,5% yang lolos. Logikanya harga harus di
+        # UJUNG range - tanda sedang bergerak kuat ke satu arah. Melonggarkan
+        # berarti menerima harga yang lebih ke tengah, yang lebih sering
+        # berarti pasar belum menentukan arah.
+        if row.trend_htf == "uptrend" and row.fib_position > self.fib_buy_min:
             direction = "buy"
-        elif row.trend_htf == "downtrend" and row.fib_position < 0.25:
+        elif row.trend_htf == "downtrend" and row.fib_position < self.fib_sell_max:
             if not self.allow_sell:
                 return None
             direction = "sell"
