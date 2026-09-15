@@ -18,7 +18,21 @@ import MetaTrader5 as mt5
 
 ROOT = Path(__file__).resolve().parents[2]
 LOG_DIR = ROOT / "logs"
-TRADES_CSV = LOG_DIR / "trades.csv"
+
+# Journal ditulis ke file BERNAMA PC MASING-MASING, bukan satu file
+# bersama.
+#
+# Alasannya: file ini ikut Git supaya hasil dari beberapa PC bisa
+# dikumpulkan. Kalau semua PC menulis ke `trades.csv` yang sama, dua PC
+# yang sama-sama menambah trade lalu push akan MENABRAK di baris yang sama
+# dan menghasilkan conflict - di tengah file data, setiap kali ada trade
+# baru.
+#
+# Dengan satu file per PC, operasi tulis tidak pernah bertabrakan.
+# Penggabungan dilakukan saat DIBACA oleh src/monitoring/journal_gabung.py.
+from .journal_gabung import TRADES_LAMA, path_pc
+
+TRADES_CSV = path_pc()
 
 MAGIC = 20260909  # magic bawaan (varian "baseline") - lihat config/variants.yaml
 
@@ -50,13 +64,25 @@ def _known_magics() -> dict[int, str]:
 
 
 def _load_existing_tickets() -> set[int]:
-    if not TRADES_CSV.exists():
-        return set()
-    try:
-        with open(TRADES_CSV, encoding="utf-8", newline="") as f:
-            return {int(row["ticket"]) for row in csv.DictReader(f) if row.get("ticket")}
-    except (OSError, ValueError, KeyError):
-        return set()
+    """Ticket yang SUDAH tercatat, dari SELURUH file journal.
+
+    Membaca semua file (termasuk milik PC lain hasil git pull), bukan hanya
+    file PC ini. Kalau hanya file sendiri yang dibaca, trade yang sudah
+    dicatat PC lain akan dicatat ULANG di sini begitu file mereka masuk -
+    dan satu posisi muncul dua kali di statistik gabungan.
+    """
+    from .journal_gabung import baca_semua
+
+    tickets: set[int] = set()
+    for row in baca_semua():
+        raw = (row.get("ticket") or "").strip()
+        if not raw:
+            continue
+        try:
+            tickets.add(int(raw))
+        except ValueError:
+            continue
+    return tickets
 
 
 def _risk_idr_from_deal(entry_deal, sl_price: float, cfg: dict) -> float:
