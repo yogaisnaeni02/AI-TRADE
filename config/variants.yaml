@@ -129,6 +129,24 @@ varian:
       momentum_fib:
         allow_sell: true
         confluence_filter: false
+        # Gate fibonacci dilonggarkan 0,75/0,25 -> 0,70/0,30 atas permintaan
+        # pemilik, sama seperti autoclose_agresif.
+        #
+        # Bar bertren jelas yang lolos gate ini naik 34,5% -> 40,7% (+18%).
+        #
+        # DIUKUR pada pyramid5, dan angkanya MENIPU kalau dibaca sepintas:
+        #   0,75/0,25 -> E[R] -0,1086  equity -Rp 332.935
+        #   0,70/0,30 -> E[R] -0,0910  equity -Rp 162.344
+        #
+        # Terlihat membaik, TETAPI kedua-duanya kehabisan modal pertengahan
+        # Agustus 2025 dan backtest berhenti di situ - tidak pernah mencapai
+        # akhir data (Sep 2026). Yang terjadi bukan "lebih untung",
+        # melainkan "modal habis sedikit lebih lambat".
+        #
+        # Pembanding yang sahih adalah baseline yang berjalan penuh, dan di
+        # sana melonggarkan fib MEMPERBURUK (+0,1254 -> +0,1054).
+        fib_buy_min: 0.70
+        fib_sell_max: 0.30
     # SEMUA BATAS RUPIAH DINAIKKAN agar rem BATCH yang menyala duluan.
     #
     # Aritmetikanya (equity Rp 5.578.289, rugi per posisi Rp 78.676):
