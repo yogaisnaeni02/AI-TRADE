@@ -211,31 +211,33 @@ varian:
   autoclose_agresif:
     magic: 20260916
     deskripsi: >
-      Versi agresif dari `autoclose` atas permintaan pemilik: ambang
-      auto-close diturunkan 20 -> 15 (lebih cepat menutup saat keyakinan
-      turun) DAN batas posisi/trade dinaikkan (2 -> 3 posisi, 12 -> 20
-      trade/hari).
-    status: eksperimen-demo-backtest-lebih-buruk
+      Gabungan pyramid5 + auto-close, atas permintaan pemilik: kerangka
+      pyramiding penuh (10 posisi searah, mode batch, 100 trade/hari)
+      DITAMBAH auto-close saat skor keyakinan turun >=15 poin.
+
+      Idenya: pyramiding menangkap momentum selagi berlangsung, auto-close
+      melepas posisi begitu momentum itu memudar - tanpa menunggu SL.
+    status: eksperimen-demo-backtest-negatif
     dokumen: docs/53-AUTOCLOSE-SKOR.md
     peringatan: >
-      KEDUA perubahan diukur lebih dulu dan KEDUANYA memperburuk hasil.
-      Dijalankan sebagai eksperimen DEMO untuk melihat apakah perilaku
-      live berbeda dari backtest - BUKAN karena diperkirakan lebih baik.
-      Angka dipilih agresif TAPI tidak menyeberang ke zona modal habis
-      (maxpos 5 membuat equity MINUS). JANGAN ke akun real.
+      KEDUA komponennya diukur lebih dulu dan KEDUANYA memperburuk:
+      pyramiding 10 posisi membuat modal HABIS (E[R] -0,133), dan ambang
+      auto-close 15 lebih buruk dari 20 (+0,2835 vs +0,2994).
+
+      Kombinasinya BELUM diukur - auto-close mungkin meredam kerugian
+      pyramiding, mungkin juga tidak. Itu justru yang diuji di demo.
+      Sama seperti pyramid5: boleh kehilangan ~42% modal dalam sehari
+      sebelum berhenti. JANGAN ke akun real.
     hasil_backtest:
       ambang_autoclose:
         turun_20: {E_R: 0.2994, catatan: "terbaik"}
-        turun_18: {E_R: 0.2981}
-        turun_15: {E_R: 0.2835, catatan: "dipakai varian ini"}
-        turun_12: {E_R: 0.2785}
+        turun_15: {E_R: 0.2835, catatan: "dipakai varian ini - lebih agresif"}
         turun_10: {E_R: 0.2477}
-        turun_8: {E_R: 0.2617}
-      posisi_dan_trade:
-        maxpos2_trade12: {E_R: 0.0673, equity: 21304756, catatan: "terbaik"}
-        maxpos3_trade20: {E_R: 0.0649, equity: 13691618, catatan: "dipakai varian ini"}
-        maxpos3_trade30: {E_R: 0.0416, equity: 15798478}
-        maxpos5_trade30: {E_R: -0.0594, equity: -21166, catatan: "modal HABIS"}
+      pyramiding:
+        maxpos_2: {E_R: 0.0673, equity: 21304756, catatan: "terbaik"}
+        maxpos_5: {E_R: -0.1260, equity: -2373}
+        maxpos_10: {E_R: -0.1332, equity: -140245, catatan: "dipakai varian ini"}
+      kombinasi: "BELUM DIUKUR - itu yang dicari lewat forward test demo"
     override:
       momentum_fib:
         allow_sell: true
@@ -244,9 +246,17 @@ varian:
         autoclose_score_drop: 15
     override_risk:
       global:
-        max_open_positions: 3
+        max_open_positions: 10
+        # Sama seperti pyramid5: breaker dinaikkan supaya rem BATCH yang
+        # menyala duluan, bukan breaker yang menghentikan sistem total.
+        max_drawdown_percent: 50.0
       daily:
-        max_trades: 20
+        loss_mode: batch
+        max_consecutive_loss_batches: 3
+        max_trades: 100
+        max_loss_percent: 45.0
+      weekly:
+        max_loss_percent: 45.0
 
   ml_walkforward:
     magic: 20260913
