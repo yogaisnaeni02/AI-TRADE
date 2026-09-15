@@ -100,16 +100,25 @@ varian:
   pyramid5:
     magic: 20260914
     deskripsi: >
-      Multi posisi SEARAH sampai 5 bersamaan, tanpa syarat jarak harga.
-      Permintaan pemilik: jangan melewatkan momentum hanya karena posisi
-      sebelumnya masih terbuka.
+      Multi posisi SEARAH sampai 10 bersamaan, tanpa syarat jarak harga,
+      dengan rentetan rugi dihitung PER BATCH bukan per posisi.
+
+      Satu batch = sekelompok posisi yang terbuka bersamaan dari satu
+      momentum. Batch berakhir saat SELURUH posisinya tutup. Batch dihitung
+      rugi hanya bila SEMUA posisi di dalamnya rugi. Maks 3 batch rugi
+      beruntun -> stop sisa hari.
+
+      Permintaan pemilik: 10 posisi dari satu momentum adalah SATU taruhan,
+      jadi tidak adil dihitung sebagai 10 loss terpisah.
     status: eksperimen-demo-backtest-negatif
-    dokumen: docs/50-MULTI-POSISI-SEARAH.md
+    dokumen: docs/52-MODE-BATCH.md
     peringatan: >
-      BACKTEST NEGATIF. Pada data 516 hari, maxpos 5 membuat modal HABIS
-      (Rp 5,58 jt -> minus), E[R] -0,126. Dijalankan sebagai eksperimen
-      DEMO untuk melihat apakah perilaku live berbeda dari backtest -
-      BUKAN karena diperkirakan menguntungkan. JANGAN ke akun real.
+      BACKTEST NEGATIF pada pengujian maxpos biasa. Pada data 516 hari,
+      maxpos 5 membuat modal HABIS (Rp 5,58 jt -> minus, E[R] -0,126) dan
+      maxpos 10 lebih buruk lagi. Mode batch belum diuji backtest secara
+      terpisah. Dijalankan sebagai eksperimen DEMO untuk melihat apakah
+      perilaku live berbeda - BUKAN karena diperkirakan menguntungkan.
+      JANGAN ke akun real.
     hasil_backtest:
       maxpos_1: {E_R: 0.0477, equity_akhir: 12731823}
       maxpos_2: {E_R: 0.0673, equity_akhir: 21304756}
@@ -120,9 +129,66 @@ varian:
       momentum_fib:
         allow_sell: true
         confluence_filter: false
+    # SEMUA BATAS RUPIAH DINAIKKAN agar rem BATCH yang menyala duluan.
+    #
+    # Aritmetikanya (equity Rp 5.578.289, rugi per posisi Rp 78.676):
+    #   1 batch (10 posisi) kena SL semua -> Rp   786.760 = 14,1%
+    #   2 batch (20 posisi)               -> Rp 1.573.520 = 28,2%
+    #   3 batch (30 posisi)               -> Rp 2.360.280 = 42,3%
+    #
+    # Supaya rem "3 batch beruntun" yang benar-benar menghentikan (bukan
+    # rem rupiah yang menyala lebih dulu), batas rupiah harus di atas 42,3%.
+    #
+    # KONSEKUENSI YANG HARUS DISADARI: varian ini boleh kehilangan ~42%
+    # modal dalam SATU HARI sebelum berhenti. Itu keputusan sadar pemilik
+    # untuk eksperimen DEMO - bukan angka yang boleh dibawa ke akun real.
     override_risk:
       global:
-        max_open_positions: 5
+        max_open_positions: 10
+        # Circuit breaker dinaikkan 20% -> 50%. Tanpa ini, breaker menyala
+        # di batch ke-2 dan MENGHENTIKAN SISTEM TOTAL (butuh reset manual),
+        # sehingga rem batch tidak pernah sempat diuji.
+        max_drawdown_percent: 50.0
+      daily:
+        loss_mode: batch
+        max_consecutive_loss_batches: 3
+        # 3 batch x 10 posisi = 30 trade. Batas lama 12 habis di batch
+        # pertama, jadi konsep batch tidak akan pernah terpakai.
+        max_trades: 35
+        max_loss_percent: 45.0
+      weekly:
+        # Mingguan juga harus di atas 42,3%, kalau tidak rem mingguan yang
+        # menyala duluan di hari pertama.
+        max_loss_percent: 45.0
+
+  autoclose:
+    magic: 20260915
+    deskripsi: >
+      Baseline + auto-close saat skor keyakinan (0-100) turun >=20 poin
+      dari nilai saat posisi dibuka, HANYA bila posisi sedang profit.
+      Tujuannya mengunci sebagian keuntungan saat kondisi yang mendasari
+      sinyal sudah memudar - bukan memotong kerugian (itu tugas SL).
+    status: terukur-tipis-belum-produksi
+    dokumen: docs/53-AUTOCLOSE-SKOR.md
+    hasil_backtest:
+      tanpa_autoclose: {E_R: 0.2815, t: 5.92}
+      turun_10: {E_R: 0.2477}
+      turun_15: {E_R: 0.2835}
+      turun_20: {E_R: 0.2994, catatan: "terbaik"}
+      turun_25: {E_R: 0.2855}
+      turun_40: {E_R: 0.2672}
+      stabilitas: "positif kedua paruh (+0,013 / +0,025)"
+      kena: "237 dari 1440 trade (16,5%)"
+    peringatan: >
+      Perbaikannya TIPIS: +0,018R per trade (~6%), dan nilai t justru turun
+      sedikit (5,92 -> 5,82). Ini mengunci profit, bukan menemukan edge
+      baru. Jangan berharap perubahan besar.
+    override:
+      momentum_fib:
+        allow_sell: true
+        confluence_filter: false
+      position_management:
+        autoclose_score_drop: 20
 
   ml_walkforward:
     magic: 20260913
