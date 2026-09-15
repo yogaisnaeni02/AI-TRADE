@@ -154,7 +154,25 @@ varian:
         max_consecutive_loss_batches: 3
         # 3 batch x 10 posisi = 30 trade. Batas lama 12 habis di batch
         # pertama, jadi konsep batch tidak akan pernah terpakai.
-        max_trades: 35
+        #
+        # DINAIKKAN 35 -> 100 (15 Sep 2026) atas permintaan pemilik untuk
+        # dicoba langsung di demo. Diukur lebih dulu, dan efeknya nihil:
+        #
+        #   max_trades  35 : n=793  E[R]=-0,1030  equity akhir -Rp  24.350
+        #   max_trades  50 : n=798  E[R]=-0,1086  equity akhir -Rp 332.935
+        #   max_trades 100 : n=798  E[R]=-0,1086  equity akhir -Rp 332.935
+        #
+        # 50 dan 100 IDENTIK karena batas 50 saja tidak pernah tercapai.
+        # Sebabnya dua-duanya terukur:
+        #   1. sinyalnya memang tidak sebanyak itu - dari 87 hari ada trade,
+        #      rata-rata 9,1/hari, maksimum yang pernah terjadi 43, dan
+        #      NOL hari mencapai 50.
+        #   2. saat rugi, batas rugi harian 45% tercapai di posisi ke-32,
+        #      jadi batas 100 tidak akan pernah tersentuh.
+        #
+        # Naik dari 35 ke 50 justru MEMPERBURUK (equity -24rb -> -333rb):
+        # 5 trade tambahan itu semuanya merugikan.
+        max_trades: 100
         max_loss_percent: 45.0
       weekly:
         # Mingguan juga harus di atas 42,3%, kalau tidak rem mingguan yang
