@@ -55,6 +55,22 @@ echo config apa adanya (settings.yaml).
 echo.
 set /p VARIAN="Varian: "
 
+rem Validasi nama varian SEBELUM bot dijalankan.
+rem
+rem Tanpa ini, salah ketik satu huruf (mis. "auto_close" vs "autoclose")
+rem baru ketahuan setelah menunggu 5 detik, lalu gagal dengan traceback
+rem Python yang terlihat menakutkan - padahal cuma typo.
+if "%VARIAN%"=="" goto varian_ok
+python -c "import sys; sys.path.insert(0,'.'); from src.variants import list_variants; sys.exit(0 if '%VARIAN%' in list_variants() else 1)"
+if errorlevel 1 (
+    echo.
+    echo !! Varian "%VARIAN%" tidak dikenal - periksa ejaannya.
+    echo    Perhatikan: nama varian TIDAK memakai garis bawah.
+    echo.
+    goto pilih_varian
+)
+
+:varian_ok
 set ARG=
 set JUDUL=config apa adanya
 if not "%VARIAN%"=="" set ARG=--varian %VARIAN%
