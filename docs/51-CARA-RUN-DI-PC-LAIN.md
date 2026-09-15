@@ -109,8 +109,18 @@ Dobel-klik:
 5-JALANKAN-VARIAN.bat
 ```
 
-Akan muncul daftar varian, lalu diminta mengetik namanya. Kosongkan lalu
-Enter kalau ingin memakai `settings.yaml` apa adanya.
+Akan menanyakan dua hal berurutan:
+
+1. **Nama PC** — label yang ditempel di notifikasi Telegram, mis.
+   `PC Rumah`. Ditanya **sekali saja**, lalu diingat di
+   `logs/nama_pc.txt`. Hapus file itu bila ingin menggantinya.
+   Kosongkan lalu Enter untuk memakai nama Windows apa adanya.
+
+2. **Nama varian** — kosongkan lalu Enter kalau ingin memakai
+   `settings.yaml` apa adanya.
+
+Nama PC berguna saat menjalankan bot di lebih dari satu komputer: tanpa
+label itu, notifikasi Telegram dari PC berbeda tidak bisa dibedakan.
 
 ### Cara B — langsung, tanpa memilih
 
@@ -233,8 +243,9 @@ Setelah semuanya terpasang, rutinitas hariannya:
 
 ```
 1. Buka MT5, login, pastikan Algo Trading hijau
-2. Dobel-klik 1-CEK.bat            -> pastikan DEMO & semua OK
-3. Dobel-klik 5-JALANKAN-VARIAN.bat -> pilih varian
+2. Dobel-klik 1-CEK.bat             -> pastikan DEMO & semua OK
+3. Dobel-klik 5-JALANKAN-VARIAN.bat -> isi nama PC (sekali saja),
+                                       lalu pilih varian
 4. Biarkan jendela terbuka
 5. Pantau lewat 4-DASHBOARD.bat
 ```

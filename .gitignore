@@ -26,6 +26,11 @@ Thumbs.db
 logs/risk_state.json
 logs/*.tmp
 
+# Nama PC untuk label notifikasi Telegram - setelan PER-PC, bukan proyek.
+# Kalau ikut di-commit, nama PC satu orang akan menimpa milik yang lain
+# setiap kali pull, dan label di Telegram jadi salah.
+logs/nama_pc.txt
+
 # Backup data sebelum perbaikan offset waktu (lokal saja, jangan di-commit)
 data_backup_pre_timefix/
 
