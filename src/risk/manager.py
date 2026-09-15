@@ -51,6 +51,10 @@ class SessionState:
     day_pnl: float = 0.0
     day_trades: int = 0
     consecutive_losses: int = 0
+    # Mode BATCH: rentetan batch rugi berturut-turut hari ini. Satu batch =
+    # sekelompok posisi yang terbuka bersamaan; dihitung rugi bila SELURUH
+    # posisi di dalamnya rugi. Hanya dipakai bila loss_mode == "batch".
+    consecutive_loss_batches: int = 0
     week_start: Optional[date] = None
     week_pnl: float = 0.0
     peak_equity: float = 0.0
@@ -84,6 +88,21 @@ class RiskManager:
         self.max_daily_loss_pct = dy["max_loss_percent"]
         self.max_daily_trades = dy["max_trades"]
         self.max_consec_losses = dy["max_consecutive_losses"]
+
+        # Mode penghitungan rentetan rugi.
+        #
+        #   "trade" (default) : tiap posisi rugi menambah rentetan.
+        #   "batch"           : sekelompok posisi yang terbuka BERSAMAAN
+        #                       dihitung sebagai SATU kejadian. Batch
+        #                       dianggap rugi hanya bila SELURUH posisi di
+        #                       dalamnya rugi.
+        #
+        # Mode batch dipakai varian pyramiding: dengan 10 posisi searah yang
+        # masuk dari satu momentum, menghitung tiap posisi sebagai loss
+        # terpisah membuat rem "3 loss beruntun" menyala setelah satu
+        # momentum saja - padahal itu baru SATU taruhan yang salah.
+        self.loss_mode = str(dy.get("loss_mode", "trade")).lower()
+        self.max_consec_loss_batches = int(dy.get("max_consecutive_loss_batches", 3))
 
         self.max_weekly_loss_pct = self.risk["weekly"]["max_loss_percent"]
 
@@ -133,6 +152,74 @@ class RiskManager:
         rows.sort(key=lambda r: r[0])
         return rows
 
+    def _read_journal_full(self) -> list[tuple[datetime, datetime, float, str]]:
+        """(entry_time, exit_time, net_idr, varian) dari journal.
+
+        Dibutuhkan mode BATCH: pengelompokan batch memerlukan entry_time,
+        bukan hanya exit_time. Dipisah dari `_read_journal()` supaya jalur
+        lama tidak ikut berubah perilakunya.
+        """
+        if not self.journal_path.exists():
+            return []
+
+        rows: list[tuple[datetime, datetime, float, str]] = []
+        try:
+            with open(self.journal_path, encoding="utf-8", newline="") as f:
+                for row in csv.DictReader(f):
+                    t_in, t_out = row.get("entry_time"), row.get("exit_time")
+                    raw_net = row.get("net_idr")
+                    if not t_in or not t_out or raw_net in (None, ""):
+                        continue
+                    try:
+                        rows.append((
+                            datetime.fromisoformat(t_in),
+                            datetime.fromisoformat(t_out),
+                            float(raw_net),
+                            row.get("varian") or "",
+                        ))
+                    except ValueError:
+                        continue
+        except OSError:
+            return []
+
+        rows.sort(key=lambda r: r[0])
+        return rows
+
+    @staticmethod
+    def _kelompokkan_batch(
+        rows: list[tuple[datetime, datetime, float, str]],
+    ) -> list[list[tuple[datetime, datetime, float, str]]]:
+        """Kelompokkan trade menjadi batch.
+
+        Definisi batch (ditetapkan pemilik, 15 Sep 2026): satu batch
+        berakhir ketika SELURUH posisi di dalamnya sudah tutup. Trade yang
+        dibuka selagi masih ada posisi batch berjalan ikut masuk ke batch
+        yang sama.
+
+        Implementasinya: telusuri trade menurut entry_time sambil menjaga
+        `batas` = exit_time terjauh di batch berjalan. Trade yang entry-nya
+        masih sebelum `batas` bergabung ke batch itu; yang entry-nya
+        setelah `batas` memulai batch baru.
+        """
+        batches: list[list] = []
+        current: list = []
+        batas: Optional[datetime] = None
+
+        for r in rows:
+            t_in, t_out = r[0], r[1]
+            if batas is None or t_in >= batas:
+                if current:
+                    batches.append(current)
+                current = [r]
+                batas = t_out
+            else:
+                current.append(r)
+                batas = max(batas, t_out)
+
+        if current:
+            batches.append(current)
+        return batches
+
     def refresh_from_journal(self, now: datetime) -> None:
         """
         Bangun ulang counter harian dan mingguan dari riwayat trade.
@@ -166,6 +253,24 @@ class RiskManager:
                 break
             streak += 1
         self.state.consecutive_losses = streak
+
+        # Rentetan BATCH rugi hari ini (hanya relevan di loss_mode "batch").
+        #
+        # Dihitung dari journal, bukan variabel memori, dengan alasan yang
+        # sama seperti counter lain: state di memori hilang saat restart,
+        # justru di momen orang paling mungkin me-restart bot.
+        if self.loss_mode == "batch":
+            full = [r for r in self._read_journal_full() if r[1].date() == today]
+            batch_streak = 0
+            for batch in reversed(self._kelompokkan_batch(full)):
+                # Batch rugi HANYA bila seluruh posisinya rugi.
+                if all(net < 0 for _, _, net, _ in batch):
+                    batch_streak += 1
+                else:
+                    break
+            self.state.consecutive_loss_batches = batch_streak
+        else:
+            self.state.consecutive_loss_batches = 0
 
         self.state.week_pnl = sum(
             net for t, net in rows if self._week_start(t.date()) == monday
@@ -388,7 +493,17 @@ class RiskManager:
         if self.state.day_trades >= self.max_daily_trades:
             return RiskDecision(False, f"batas {self.max_daily_trades} trade/hari tercapai")
 
-        if self.state.consecutive_losses >= self.max_consec_losses:
+        if self.loss_mode == "batch":
+            # Rentetan dihitung per BATCH, bukan per posisi. Posisi tambahan
+            # yang masuk selagi batch berjalan TIDAK memicu rem ini - itu
+            # seluruh maksud mode batch.
+            if self.state.consecutive_loss_batches >= self.max_consec_loss_batches:
+                return RiskDecision(
+                    False,
+                    f"{self.state.consecutive_loss_batches} batch rugi beruntun "
+                    "— stop sisa hari",
+                )
+        elif self.state.consecutive_losses >= self.max_consec_losses:
             return RiskDecision(
                 False, f"{self.state.consecutive_losses} loss beruntun — stop sisa hari"
             )

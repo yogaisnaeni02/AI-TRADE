@@ -44,9 +44,105 @@ class Signal:
     session: str
     reasons: str
     size_tier: str = "full"   # "full" (1x risiko) atau "reduced" (risiko lebih kecil)
+    score100: int = 0         # skor 0-100, lihat hitung_skor100()
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+# Bobot komponen skor 0-100 untuk momentum_fib.
+#
+# KENAPA ADA SKALA KEDUA
+# ----------------------
+# `score` lama (5-8) dipakai gerbang `min_score` dan tidak boleh diubah -
+# seluruh angka backtest, forward test, dan sidik jari config terikat
+# padanya. Mengubah skalanya akan memutus perbandingan dengan semua
+# pengukuran sebelumnya.
+#
+# Tetapi skala 5-8 terlalu kasar untuk mendeteksi "keyakinan menurun" pada
+# posisi yang sedang berjalan: turun 1 poin saja sudah 12,5% dari rentang.
+# `score100` memberi resolusi yang cukup untuk itu, dihitung dari komponen
+# yang SAMA, hanya diberi bobot yang lebih halus.
+#
+# Bobotnya mengikuti kekuatan bukti masing-masing komponen (docs/36):
+#   momentum   40 - inti setup, satu-satunya yang wajib
+#   tren HTF   20 - arah; tanpa ini sinyal tidak pernah terbentuk
+#   ADX        15 - kekuatan tren, terukur menyumbang sendiri (+0,079R)
+#   candle     10 - konfirmasi arah bar entry (+0,052R)
+#   fib         8 - posisi dalam range
+#   volatilitas 4 - ATR di rentang ideal
+#   stochastic  3 - konfirmasi tambahan
+BOBOT_SKOR100 = {
+    "momentum": 40,
+    "trend_htf": 20,
+    "adx": 15,
+    "candle": 10,
+    "fib": 8,
+    "volatilitas": 4,
+    "stochastic": 3,
+}
+
+
+def hitung_skor100(row, direction: str) -> int:
+    """Skor keyakinan 0-100 untuk satu bar, pada arah tertentu.
+
+    Dirancang agar bisa dipanggil ULANG untuk posisi yang sedang berjalan -
+    tidak bergantung pada state apa pun selain bar saat ini dan arah posisi.
+    Itu sebabnya fungsinya di level modul, bukan method RuleEngine.
+
+    Mengembalikan 0 bila data yang dibutuhkan tidak tersedia.
+    """
+    skor = 0.0
+    is_buy = direction == "buy"
+
+    # --- momentum (40) - proporsional terhadap ambang, dibatasi 1,5x ------
+    mom = getattr(row, "mom_24", None)
+    amb = getattr(row, "mom_24_q85", None)
+    if mom is not None and amb is not None and pd.notna(mom) and pd.notna(amb) and amb > 0:
+        mom_arah = mom if is_buy else -mom
+        rasio = max(0.0, min(mom_arah / amb, 1.5))
+        skor += BOBOT_SKOR100["momentum"] * (rasio / 1.5)
+
+    # --- tren HTF (20) ----------------------------------------------------
+    htf = getattr(row, "trend_htf", None)
+    if htf == ("uptrend" if is_buy else "downtrend"):
+        skor += BOBOT_SKOR100["trend_htf"]
+    elif htf == "ranging":
+        skor += BOBOT_SKOR100["trend_htf"] * 0.4
+
+    # --- ADX (15) - penuh di 25+, proporsional di bawahnya ----------------
+    adx = getattr(row, "adx", None)
+    if adx is not None and pd.notna(adx):
+        skor += BOBOT_SKOR100["adx"] * min(adx / 25.0, 1.0)
+
+    # --- candle searah (10) ----------------------------------------------
+    o, c = getattr(row, "open", None), getattr(row, "close", None)
+    if o is not None and c is not None and pd.notna(o) and pd.notna(c):
+        if (c > o) == is_buy:
+            skor += BOBOT_SKOR100["candle"]
+
+    # --- posisi fib (8) ---------------------------------------------------
+    fib = getattr(row, "fib_position", None)
+    if fib is not None and pd.notna(fib):
+        # buy ideal di atas 0,75; sell ideal di bawah 0,25
+        nilai = fib if is_buy else (1.0 - fib)
+        if nilai >= 0.75:
+            skor += BOBOT_SKOR100["fib"]
+        elif nilai >= 0.5:
+            skor += BOBOT_SKOR100["fib"] * 0.5
+
+    # --- volatilitas ideal (4) -------------------------------------------
+    atrp = getattr(row, "atr_percentile", None)
+    if atrp is not None and pd.notna(atrp) and 0.30 <= atrp <= 0.85:
+        skor += BOBOT_SKOR100["volatilitas"]
+
+    # --- stochastic (3) ---------------------------------------------------
+    st = getattr(row, "stoch_k", None)
+    if st is not None and pd.notna(st):
+        if (is_buy and st > 70) or (not is_buy and st < 30):
+            skor += BOBOT_SKOR100["stochastic"]
+
+    return int(round(max(0.0, min(100.0, skor))))
 
 
 class RuleEngine:
@@ -246,6 +342,7 @@ class RuleEngine:
             session=row.session,
             reasons="; ".join(reasons),
             size_tier=size_tier,
+            score100=hitung_skor100(row, direction),
         )
 
     # -- setup 1: London Sweep Reversal ----------------------------------

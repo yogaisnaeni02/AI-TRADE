@@ -33,7 +33,7 @@ from ..risk.manager import RiskManager
 from ..strategy import sessions, structure
 from ..monitoring import notifier
 from ..monitoring.journal import sync_closed_trades
-from ..strategy.setups import RuleEngine
+from ..strategy.setups import RuleEngine, hitung_skor100
 from .order_manager import OrderManager
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -87,6 +87,11 @@ class TradingBot:
             trail_atr_mult if trail_atr_mult is not None else pm.get("trail_atr_mult", 2.5)
         )
         self.max_bars_hold = pm.get("max_bars_hold", 48)
+
+        # Auto-close saat skor keyakinan (0-100) turun sekian poin dari
+        # nilainya saat posisi dibuka. 0 = mati. Hanya berlaku saat posisi
+        # sedang PROFIT - lihat catatan pengukuran di manage_positions().
+        self.autoclose_score_drop = int(pm.get("autoclose_score_drop", 0))
         self.min_score = min_score
         self.max_score = max_score
         self.allowed_setups = tuple(
@@ -121,6 +126,24 @@ class TradingBot:
         print(line)
         with open(self.log_path, "a", encoding="utf-8") as f:
             f.write(line + "\n")
+
+    def _teks_rem_rugi(self) -> str:
+        """Teks rem rugi sesuai MODE YANG AKTIF.
+
+        Sebelumnya log selalu mencetak "N/M loss beruntun" apa pun modenya.
+        Pada varian ber-loss_mode "batch" itu menyesatkan: log menampilkan
+        "6/3 loss beruntun" (terlihat seperti sudah lewat batas dan bot
+        berhenti) padahal gerbang memakai penghitung BATCH yang saat itu
+        baru 2/3 dan tetap mengizinkan entry. Angka yang dicetak harus
+        angka yang benar-benar dipakai memutuskan.
+        """
+        st = self.risk.state
+        if self.risk.loss_mode == "batch":
+            return (
+                f"{st.consecutive_loss_batches}/{self.risk.max_consec_loss_batches}"
+                f" batch rugi ({st.consecutive_losses} posisi)"
+            )
+        return f"{st.consecutive_losses}/{self.risk.max_consec_losses} loss beruntun"
 
     def stop_requested(self) -> bool:
         return STOP_FILE.exists()
@@ -237,11 +260,16 @@ class TradingBot:
         for pos in self.orders.get_positions():
             info = self._entry_info.get(pos.ticket)
             if info is None:
-                # Posisi dari sesi sebelumnya — rekonstruksi dari data broker
+                # Posisi dari sesi sebelumnya — rekonstruksi dari data broker.
+                # `bar_entry` diambil dari waktu buka posisi milik broker,
+                # bukan bar sekarang; tanpa itu timeout terhitung ulang dari
+                # nol setiap kali bot di-restart, dan posisi lama bisa
+                # tertahan jauh melebihi max_bars_hold.
                 info = {
                     "entry": pos.price_open,
                     "sl_dist": abs(pos.price_open - pos.sl) if pos.sl else atr_now,
                     "be_done": False,
+                    "bar_entry": pd.Timestamp(pos.time, unit="s"),
                 }
                 self._entry_info[pos.ticket] = info
 
@@ -269,10 +297,57 @@ class TradingBot:
                 if self.orders.modify_position(pos.ticket, new_sl):
                     self.log(f"  SL ticket {pos.ticket} -> {new_sl:.3f}")
 
+            # AUTO-CLOSE saat keyakinan menurun tajam.
+            #
+            # Dijalankan HANYA bila posisi sedang PROFIT - tujuannya mengunci
+            # sebagian keuntungan saat kondisi yang mendasari sinyal sudah
+            # memudar, bukan memotong kerugian (itu tugas SL).
+            #
+            # Ambang 20 poin dipilih dari sapuan pada 1.440 trade backtest:
+            #   tanpa auto-close  E[R]=+0,2815
+            #   turun >=10        E[R]=+0,2477  (terlalu sensitif, merugikan)
+            #   turun >=15        E[R]=+0,2835
+            #   turun >=20        E[R]=+0,2994  <- terbaik
+            #   turun >=25        E[R]=+0,2855
+            #   turun >=40        E[R]=+0,2672
+            # Stabil di kedua paruh data (+0,013 dan +0,025).
+            #
+            # KEJUJURAN UKURAN: perbaikannya tipis (+0,018R per trade, ~6%)
+            # dan nilai t justru turun sedikit (5,92 -> 5,82). Ini mengunci
+            # profit, bukan menemukan edge baru.
+            if self.autoclose_score_drop > 0 and profit_dist > 0:
+                skor_awal = info.get("score100", 0)
+                if skor_awal > 0:
+                    skor_kini = hitung_skor100(last, "buy" if is_buy else "sell")
+                    turun = skor_awal - skor_kini
+                    if turun >= self.autoclose_score_drop:
+                        res = self.orders.close_position(pos.ticket)
+                        if res.success:
+                            self.log(
+                                f"  AUTOCLOSE ticket {pos.ticket}: skor "
+                                f"{skor_awal}->{skor_kini} (turun {turun}) "
+                                f"-> ditutup @ {res.price:.3f}"
+                            )
+                            self._entry_info.pop(pos.ticket, None)
+                            continue
+
             # Timeout: tutup posisi yang ditahan melebihi batas.
             # Backtest memakai batas yang sama, jadi live harus konsisten.
-            bars_held = info.setdefault("bars", 0)
-            info["bars"] = bars_held + 1
+            #
+            # DIPERBAIKI 15 Sep 2026: dulu `bars` ditambah 1 tiap panggilan
+            # manage_positions(). Itu benar selama fungsi ini hanya dipanggil
+            # sekali per bar M5 - tetapi sejak dipindah ke loop utama (agar
+            # trailing dicek tiap siklus), penghitung itu akan melonjak
+            # sesuai interval polling: dengan poll 3 detik, batas 48 bar
+            # tercapai dalam 2,4 MENIT, bukan 4 jam.
+            #
+            # Sekarang umur posisi dihitung dari SELISIH WAKTU bar, bukan
+            # jumlah panggilan - kebal terhadap perubahan interval polling.
+            bar_now = last["time_utc"]
+            bar_entry = info.setdefault("bar_entry", bar_now)
+            info["bars"] = int(
+                (pd.Timestamp(bar_now) - pd.Timestamp(bar_entry)).total_seconds() // 300
+            )
             if info["bars"] > self.max_bars_hold:
                 res = self.orders.close_position(pos.ticket)
                 if res.success:
@@ -385,7 +460,9 @@ class TradingBot:
             pass
 
     def process_bar(self, df: pd.DataFrame) -> None:
-        self.manage_positions(df)
+        # manage_positions() TIDAK dipanggil di sini lagi - sudah dijalankan
+        # tiap siklus di run(), bukan hanya saat bar berganti. Lihat catatan
+        # bug trailing di run().
 
         # Heartbeat tiap 12 bar M5 (1 jam) ke log, dan tiap HB_TELEGRAM_JAM
         # ke Telegram.
@@ -491,6 +568,10 @@ class TradingBot:
                 "entry": result.price,
                 "sl_dist": abs(result.price - sig["sl"]),
                 "be_done": False,
+                # Waktu bar saat entry - dasar penghitungan timeout.
+                "bar_entry": sig["time"],
+                # Skor keyakinan saat dibuka, dasar pembanding auto-close.
+                "score100": int(sig.get("score100", 0)),
             }
             self.log(f"  ORDER OK ticket={result.ticket} @ {result.price:.3f}")
         else:
@@ -644,7 +725,7 @@ class TradingBot:
         self.log(
             f"Rem hari ini: {self.risk.state.day_trades}/{self.risk.max_daily_trades} trade"
             f" | P/L Rp {self.risk.state.day_pnl:,.0f}"
-            f" | {self.risk.state.consecutive_losses}/{self.risk.max_consec_losses} loss beruntun"
+            f" | {self._teks_rem_rugi()}"
             f" | puncak equity Rp {self.risk.state.peak_equity:,.0f}"
             f" (DD {self.risk.current_drawdown_pct(acc.equity):.1f}%)"
         )
@@ -667,6 +748,27 @@ class TradingBot:
                 try:
                     df = self.build_frame()
                     bar_time = df.iloc[-1]["time_utc"]
+
+                    # MANAJEMEN POSISI DIJALANKAN TIAP SIKLUS, bukan hanya
+                    # saat bar M5 berganti.
+                    #
+                    # BUG YANG DIPERBAIKI (15 Sep 2026): manage_positions()
+                    # dulu hanya dipanggil dari dalam process_bar(), yang
+                    # sendiri hanya jalan saat bar M5 baru terbentuk.
+                    # Akibatnya trailing stop cuma dicek SEKALI PER 5 MENIT
+                    # meski bot polling tiap beberapa detik.
+                    #
+                    # Dampaknya terukur di backtest: dari trade yang harganya
+                    # sempat melewati ambang trailing 2,4R, hanya 11 dari 63
+                    # yang terdeteksi - 52 sisanya menyentuh ambang di tengah
+                    # bar lalu berbalik sebelum bar tutup, sehingga trailing
+                    # tidak pernah aktif dan posisi rugi penuh (Rp 6,99 juta).
+                    #
+                    # Sinyal TETAP dievaluasi per bar selesai (process_bar),
+                    # karena indikator hanya sahih pada bar yang sudah tutup.
+                    # Yang dipindah ke sini hanya manajemen posisi terbuka.
+                    if self.orders is not None:
+                        self.manage_positions(df)
 
                     if bar_time != self._last_bar_time:
                         self._last_bar_time = bar_time
@@ -699,8 +801,7 @@ class TradingBot:
                             self.log(
                                 f"  Rem: {self.risk.state.day_trades}/{self.risk.max_daily_trades} trade"
                                 f" | P/L Rp {self.risk.state.day_pnl:,.0f}"
-                                f" | {self.risk.state.consecutive_losses}/{self.risk.max_consec_losses}"
-                                " loss beruntun"
+                                f" | {self._teks_rem_rugi()}"
                             )
                     except Exception:  # noqa: BLE001
                         pass
