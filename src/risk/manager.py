@@ -13,7 +13,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 
 import yaml
 
@@ -323,6 +323,8 @@ class RiskManager:
         news_blackout: bool = False,
         confidence: Optional[float] = None,
         size_tier: str = "full",
+        direction: Optional[str] = None,
+        open_directions: Optional[Sequence[str]] = None,
     ) -> RiskDecision:
         """Gerbang tunggal sebelum order dikirim. Gagal satu = tolak."""
         self._roll_period(now, equity)
@@ -356,6 +358,27 @@ class RiskManager:
 
         if open_positions >= self.max_positions:
             return RiskDecision(False, f"sudah ada {open_positions} posisi terbuka")
+
+        # HANYA SEARAH. Posisi tambahan boleh dibuka hanya bila arahnya SAMA
+        # dengan posisi yang sudah terbuka.
+        #
+        # Alasannya bukan selera, melainkan aritmetika: buy dan sell pada
+        # simbol yang sama saling meniadakan eksposurnya, tetapi spread
+        # dibayar DUA KALI. Net exposure ~nol dengan biaya 2x adalah cara
+        # paling cepat menggerus modal tanpa mengambil risiko apa pun yang
+        # berpeluang menghasilkan.
+        #
+        # Kalau suatu saat ingin memegang arah berlawanan secara sengaja,
+        # itu harus datang dari SISTEM BERBEDA (mis. swing H4 vs scalping M5)
+        # dengan magic number sendiri, bukan dari setup yang sama.
+        if direction and open_directions:
+            lawan = [d for d in open_directions if d and d != direction]
+            if lawan:
+                return RiskDecision(
+                    False,
+                    f"sudah ada {len(lawan)} posisi arah {lawan[0]} — "
+                    f"sinyal {direction} berlawanan, ditolak (hanya searah)",
+                )
 
         if spread_points > self.max_spread:
             return RiskDecision(

@@ -111,25 +111,33 @@ weekly:
 
 global:
   max_drawdown_percent: 20.0  # MATIKAN SISTEM - butuh reset manual
-  # DINAIKKAN 1 -> 2 (10 Sep 2026) khusus eksperimen demo dua arah.
+  # DINAIKKAN 2 -> 5 (15 Sep 2026) atas permintaan pemilik: multi posisi
+  # SEARAH (pyramiding) saat sinyal searah terus bermunculan.
   #
-  # Alasan: dengan batas 1, posisi sell memblokir sinyal buy. Terukur di
-  # backtest: menyalakan sell menggeser 110 trade buy (845 -> 735), yang
-  # berarti forward test sisi buy ikut terkontaminasi.
+  # KOREKSI ATAS KOMENTAR LAMA: nilai 2 dulu dijelaskan sebagai "satu posisi
+  # per arah". Itu TIDAK PERNAH benar - risk manager hanya menghitung TOTAL
+  # posisi, tidak memisahkan arah. Akibatnya 2 posisi SEARAH juga lolos, dan
+  # itulah yang terjadi 14 Sep 2026 (5 pasang posisi dobel dalam 4-7 detik).
   #
-  # PERHATIAN: backtest/engine.py HARDCODE 1 posisi dan tidak membaca nilai
-  # ini, jadi efek nilai 2 TIDAK bisa divalidasi lewat backtest - hanya
-  # berlaku di live. Arah selisihnya aman (backtest lebih ketat), tetapi
-  # pembanding forward test sisi buy harus memakai angka "sell mati"
-  # (n=845, E[R] +0,1092), bukan angka campuran.
+  # Sekarang aturannya dibuat eksplisit di kode, bukan diasumsikan di
+  # komentar: `RiskManager.check()` menolak sinyal yang BERLAWANAN arah
+  # dengan posisi yang sudah terbuka. Jadi 5 = maksimal 5 posisi SEARAH.
+  # Buy dan sell tidak akan pernah terbuka bersamaan dari setup yang sama.
   #
-  # Nilai 2 = satu posisi per arah, sehingga kedua sisi dikumpulkan
-  # sendiri-sendiri tanpa saling mengambil jatah.
+  # KONSEKUENSI yang harus disadari (equity Rp 5,58 jt, SL maks 4500 pts):
+  #   1 posisi kena SL -> Rp  78.676  (1,41%)
+  #   5 posisi kena SL -> Rp 393.381  (7,05%)
+  # Karena semua searah, mereka menang bareng dan kalah bareng - tidak ada
+  # diversifikasi. Rem yang menahan: batas rugi harian 4% (Rp 223.132)
+  # menyala SEBELUM 5 posisi sempat kena SL semua, sehingga 7,05% itu
+  # plafon teoretis, bukan yang realistis terjadi dalam satu hari.
   #
-  # KONSEKUENSI: eksposur maksimum menjadi 2x (Rp ~140.000 = 2,7% equity).
-  # Itu diterima di demo. KEMBALIKAN KE 1 sebelum akun real, kecuali sisi
-  # sell sudah lolos gerbangnya sendiri.
-  max_open_positions: 2
+  # PERHATIAN: backtest/engine.py membaca nilai ini, tetapi backtest TIDAK
+  # mensimulasikan pyramiding dari sinyal berturut-turut dengan cara yang
+  # sama seperti live. Angka backtest tetap pembanding yang lebih ketat.
+  #
+  # KEMBALIKAN KE 1 sebelum akun real sampai pyramiding terbukti di demo.
+  max_open_positions: 5
 
 # Position sizing adaptif - lot lebih besar saat keyakinan sinyal tinggi.
 #

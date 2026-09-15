@@ -426,16 +426,25 @@ class TradingBot:
         # risk_limits.yaml (default nonaktif — lihat alasannya di sana).
         confidence = min(1.0, sig["score"] / 10.0)
 
+        # Arah posisi yang sedang terbuka — dipakai gerbang "hanya searah".
+        posisi_terbuka = self.orders.get_positions()
+        arah_terbuka = [
+            "buy" if p.type == mt5.POSITION_TYPE_BUY else "sell"
+            for p in posisi_terbuka
+        ]
+
         decision = self.risk.check(
             now=datetime.now(),
             equity=acc.equity,
             sl_points=sig["sl_points"],
             tp_points=sig["tp_points"],
             spread_points=info.spread,
-            open_positions=len(self.orders.get_positions()),
+            open_positions=len(posisi_terbuka),
             stop_file_exists=self.stop_requested(),
             confidence=confidence,
             size_tier=sig.get("size_tier", "full"),
+            direction=sig["direction"],
+            open_directions=arah_terbuka,
         )
 
         if not decision.allowed:
