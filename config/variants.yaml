@@ -208,6 +208,46 @@ varian:
       position_management:
         autoclose_score_drop: 20
 
+  autoclose_agresif:
+    magic: 20260916
+    deskripsi: >
+      Versi agresif dari `autoclose` atas permintaan pemilik: ambang
+      auto-close diturunkan 20 -> 15 (lebih cepat menutup saat keyakinan
+      turun) DAN batas posisi/trade dinaikkan (2 -> 3 posisi, 12 -> 20
+      trade/hari).
+    status: eksperimen-demo-backtest-lebih-buruk
+    dokumen: docs/53-AUTOCLOSE-SKOR.md
+    peringatan: >
+      KEDUA perubahan diukur lebih dulu dan KEDUANYA memperburuk hasil.
+      Dijalankan sebagai eksperimen DEMO untuk melihat apakah perilaku
+      live berbeda dari backtest - BUKAN karena diperkirakan lebih baik.
+      Angka dipilih agresif TAPI tidak menyeberang ke zona modal habis
+      (maxpos 5 membuat equity MINUS). JANGAN ke akun real.
+    hasil_backtest:
+      ambang_autoclose:
+        turun_20: {E_R: 0.2994, catatan: "terbaik"}
+        turun_18: {E_R: 0.2981}
+        turun_15: {E_R: 0.2835, catatan: "dipakai varian ini"}
+        turun_12: {E_R: 0.2785}
+        turun_10: {E_R: 0.2477}
+        turun_8: {E_R: 0.2617}
+      posisi_dan_trade:
+        maxpos2_trade12: {E_R: 0.0673, equity: 21304756, catatan: "terbaik"}
+        maxpos3_trade20: {E_R: 0.0649, equity: 13691618, catatan: "dipakai varian ini"}
+        maxpos3_trade30: {E_R: 0.0416, equity: 15798478}
+        maxpos5_trade30: {E_R: -0.0594, equity: -21166, catatan: "modal HABIS"}
+    override:
+      momentum_fib:
+        allow_sell: true
+        confluence_filter: false
+      position_management:
+        autoclose_score_drop: 15
+    override_risk:
+      global:
+        max_open_positions: 3
+      daily:
+        max_trades: 20
+
   ml_walkforward:
     magic: 20260913
     deskripsi: >
