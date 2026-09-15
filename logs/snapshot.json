@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-09-15T12:30:58.362708",
+  "timestamp": "2026-09-15T12:41:54.818732",
   "mode": "EXECUTOR",
   "symbol": "XAUUSDm",
   "equity": 6153289.64,
@@ -9,9 +9,9 @@
   "positions": [],
   "drawdown_pct": 3.7548634606928615,
   "effective_risk_pct": 1.35,
-  "day_trades": 13,
-  "day_pnl": 724834.7,
-  "consecutive_losses": 1,
+  "day_trades": 0,
+  "day_pnl": 0,
+  "consecutive_losses": 0,
   "halted": false,
   "halt_reason": "",
   "stop_file": false
