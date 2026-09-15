@@ -24,11 +24,30 @@ from pathlib import Path
 from typing import Optional
 
 import os
+import socket
 
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = ROOT / "config" / "settings.yaml"
+
+# Label PC ditempel di depan tiap pesan. Tanpa ini, notifikasi dari beberapa
+# PC yang menjalankan bot untuk akun yang sama tidak bisa dibedakan di
+# Telegram - persis kebutuhan yang muncul saat menguji di beberapa PC
+# sekaligus (lihat insiden posisi dobel 14 Sep 2026, docs/51).
+#
+# Default hostname Windows (mis. DESKTOP-ABC123) sering tidak informatif.
+# Override lewat env var AI_TRADE_PC_NAME, atau lewat run_bot.py --nama-pc
+# (lihat set_label() di bawah) - dipilih pas menjalankan bot, tidak perlu
+# rename PC atau restart Windows.
+_LABEL = os.environ.get("AI_TRADE_PC_NAME") or socket.gethostname()
+
+
+def set_label(name: str) -> None:
+    """Timpa label yang ditempel di notifikasi (dipanggil dari run_bot.py)."""
+    global _LABEL
+    if name:
+        _LABEL = name
 
 
 def _load_telegram_config() -> tuple[Optional[str], Optional[str]]:
@@ -81,7 +100,7 @@ def send(message: str) -> bool:
         url = f"https://api.telegram.org/bot{token}/sendMessage"
         data = urllib.parse.urlencode({
             "chat_id": chat_id,
-            "text": message,
+            "text": f"🖥 <b>{_LABEL}</b>\n{message}",
             "parse_mode": "HTML",
         }).encode()
 

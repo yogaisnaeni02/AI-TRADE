@@ -210,8 +210,17 @@ data:
 mode: EXECUTOR                # OBSERVER -> ADVISOR -> EXECUTOR
                               # jangan naikkan sebelum lulus gate tiap tahap
 
-# Notifikasi Telegram (opsional). Isi keduanya untuk mengaktifkan.
-# Panduan setup: lihat docstring di src/monitoring/notifier.py
+# Notifikasi Telegram. Dibaca sebagai DEFAULT di semua PC yang pull repo
+# ini - tidak perlu setx manual lagi per PC. Env var AI_TRADE_TG_TOKEN /
+# AI_TRADE_TG_CHAT_ID (lihat src/monitoring/notifier.py) tetap didahulukan
+# kalau diisi, jadi ini aman ditimpa per PC bila suatu saat perlu bot
+# Telegram terpisah.
+#
+# DISEPAKATI aman disimpan di sini (bukan env var) karena repo ini
+# PRIVATE, cuma dipakai berdua dengan teman. Kalau repo ini nanti
+# di-public-kan atau di-share lebih luas, GANTI token bot ini dulu lewat
+# @BotFather (/revoke) sebelum itu terjadi - token di sini otomatis ikut
+# terbuka ke siapa pun yang bisa baca repo.
 telegram:
-  bot_token: ""    # dari @BotFather
-  chat_id: ""       # dari api.telegram.org/bot<TOKEN>/getUpdates
+  bot_token: "8808694293:AAFzSVseX61h6cOe-CJa-Y5kP3bBuxsc4BQ"
+  chat_id: "6807301741"

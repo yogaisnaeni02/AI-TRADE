@@ -55,7 +55,19 @@ def main() -> int:
         action="store_true",
         help="izinkan EXECUTOR di akun REAL (tanpa ini bot berhenti)",
     )
+    ap.add_argument(
+        "--nama-pc", default=None,
+        help=(
+            "label PC di notifikasi Telegram, mis. 'Laptop Kantor' "
+            "(default: hostname Windows, sering tidak informatif kalau "
+            "menjalankan bot di beberapa PC sekaligus)"
+        ),
+    )
     args = ap.parse_args()
+
+    if args.nama_pc:
+        from src.monitoring import notifier
+        notifier.set_label(args.nama_pc)
 
     if args.daftar_varian:
         from src.variants import format_table
