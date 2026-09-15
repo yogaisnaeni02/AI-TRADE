@@ -21,6 +21,14 @@ echo   KIRIM LOG TRADE KE REPO
 echo ============================================
 echo.
 
+rem 0. Buang perubahan pada file RUNTIME sebelum pull.
+rem
+rem snapshot.json ditulis ulang bot tiap beberapa detik. Kalau file itu
+rem masih tercatat di Git pada klon lama, `git pull` akan GAGAL dengan
+rem "local changes would be overwritten" setiap kali bot berjalan.
+rem Membuangnya aman - bot menulisnya lagi dalam hitungan detik.
+git checkout -- logs/snapshot.json 2>nul
+
 rem 1. Ambil dulu milik PC lain. Dilakukan SEBELUM commit supaya tidak
 rem    perlu merge di tengah jalan.
 echo [1/3] Mengambil log dari PC lain...
@@ -52,9 +60,13 @@ if errorlevel 1 (
     echo     tidak ada trade baru untuk dikirim.
 )
 
-rem 3. Tampilkan gabungan seluruh PC.
+rem 3. Bangun file gabungan + tampilkan ringkasan.
+rem
+rem logs/trades_gabungan.csv berisi trade dari SEMUA PC dalam satu file,
+rem siap dibuka di Excel. File ini TURUNAN - tidak ikut Git, dibangun
+rem ulang tiap kali skrip ini dijalankan.
 echo.
-echo [3/3] Ringkasan gabungan semua PC:
+echo [3/3] Menggabungkan log semua PC...
 echo.
 python -m src.monitoring.journal_gabung
 

@@ -26,6 +26,14 @@ Thumbs.db
 logs/risk_state.json
 logs/*.tmp
 
+# Snapshot kondisi bot - DITULIS ULANG TIAP SIKLUS (3 detik).
+#
+# Dulu ikut Git dan itu salah: file yang berubah tiap detik membuat
+# `git pull` GAGAL dengan "local changes would be overwritten" setiap kali
+# bot sedang berjalan. Isinya pun tidak berguna bagi PC lain - hanya
+# kondisi sesaat mesin yang menulisnya.
+logs/snapshot.json
+
 # Nama PC untuk label notifikasi Telegram - setelan PER-PC, bukan proyek.
 # Kalau ikut di-commit, nama PC satu orang akan menimpa milik yang lain
 # setiap kali pull, dan label di Telegram jadi salah.
