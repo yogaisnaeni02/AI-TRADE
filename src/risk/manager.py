@@ -136,6 +136,9 @@ class RiskManager:
         gl = self.risk["global"]
         self.max_dd_pct = gl["max_drawdown_percent"]
         self.max_positions = gl["max_open_positions"]
+        # Jarak minimal entry baru terhadap posisi yang sudah terbuka, dalam
+        # kelipatan ATR saat sinyal. 0 = mati (perilaku lama).
+        self.min_jarak_entry_atr = float(gl.get("min_jarak_entry_atr", 0.0) or 0.0)
         self.max_spread = self.cfg["costs"]["spread_max_accept"]
 
         self.derisking = self.risk.get("derisking", [])
@@ -474,6 +477,9 @@ class RiskManager:
         size_tier: str = "full",
         direction: Optional[str] = None,
         open_directions: Optional[Sequence[str]] = None,
+        atr: Optional[float] = None,
+        harga: Optional[float] = None,
+        harga_posisi: Optional[Sequence[float]] = None,
     ) -> RiskDecision:
         """Gerbang tunggal sebelum order dikirim. Gagal satu = tolak."""
         self._roll_period(now, equity)
@@ -527,6 +533,29 @@ class RiskManager:
                     False,
                     f"sudah ada {len(lawan)} posisi arah {lawan[0]} — "
                     f"sinyal {direction} berlawanan, ditolak (hanya searah)",
+                )
+
+        # JARAK ANTAR ENTRY saat menumpuk posisi (pyramiding).
+        #
+        # 16 Sep 2026: tujuh posisi BUY dibuka di 4325-4327 dalam setengah
+        # jam, lalu koreksi 6 poin ke 4321 menyapu ketujuhnya sekaligus -
+        # docs/AnalisaLog/KESIMPULAN-ANALISA-LOG-16SEP2026.md. Posisi yang
+        # menumpuk di harga hampir sama bukan diversifikasi: SL-nya
+        # berdekatan sehingga kena BERSAMAAN, jadi itu satu taruhan yang
+        # diperbesar. Pola yang sama sudah tercatat di backtest (catatan
+        # max_open_positions di config/risk_limits.yaml: 119 kejadian
+        # tutup-bareng, 347 trade, rugi Rp 17,9 juta).
+        #
+        # Butuh atr + harga + daftar harga posisi dari pemanggil; tanpa itu
+        # gerbang ini dilewati supaya pemanggil lama tidak berubah perilaku.
+        if self.min_jarak_entry_atr > 0 and harga_posisi and atr and harga is not None:
+            jarak_min = self.min_jarak_entry_atr * float(atr)
+            terdekat = min(abs(float(harga) - float(p)) for p in harga_posisi)
+            if terdekat < jarak_min:
+                return RiskDecision(
+                    False,
+                    f"jarak ke posisi terdekat {terdekat:.2f} < "
+                    f"{self.min_jarak_entry_atr:g} x ATR ({jarak_min:.2f})",
                 )
 
         if spread_points > self.max_spread:

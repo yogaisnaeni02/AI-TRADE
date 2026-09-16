@@ -345,6 +345,47 @@ def test_mode_batch_per_varian(tmp: Path) -> None:
     assert rm.state.consecutive_loss_batches == 2, rm.state.consecutive_loss_batches
 
 
+# -- jarak antar entry (pyramiding) --------------------------------------
+
+
+def _manager_jarak(tmp: Path, jarak: float) -> RiskManager:
+    risk = copy.deepcopy(load_risk_config())
+    risk["global"]["min_jarak_entry_atr"] = jarak
+    return RiskManager(risk=risk, journal_path=tmp / "j.csv", state_path=tmp / "s.json")
+
+
+def test_jarak_entry_memblokir_posisi_menumpuk(tmp: Path) -> None:
+    """Regresi kejadian live 16 Sep 2026: tujuh posisi BUY dibuka di
+    4325-4327, lalu koreksi 6 poin menyapu semuanya sekaligus."""
+    rm = _manager_jarak(tmp, 1.0)
+    arg = {**BASE, "open_positions": 1, "atr": 4.0, "harga": 4325.0}
+
+    d = rm.check(now=NOW, **{**arg, "harga_posisi": [4326.5]})     # jarak 1,5 < 4,0
+    assert not d.allowed, "entry menumpuk harus ditolak"
+    assert "jarak" in d.reason, d.reason
+
+    d = rm.check(now=NOW, **{**arg, "harga_posisi": [4335.0]})     # jarak 10 > 4,0
+    assert d.allowed, d.reason
+
+    # Yang dipakai adalah posisi TERDEKAT, bukan yang pertama.
+    d = rm.check(now=NOW, **{**arg, "harga_posisi": [4335.0, 4326.0]})
+    assert not d.allowed, d.reason
+
+
+def test_jarak_entry_mati_secara_default(tmp: Path) -> None:
+    rm = make_manager(tmp, [])
+    assert rm.min_jarak_entry_atr == 0.0, rm.min_jarak_entry_atr
+    d = rm.check(now=NOW, **{**BASE, "open_positions": 1, "atr": 4.0,
+                             "harga": 4325.0, "harga_posisi": [4325.1]})
+    assert d.allowed, d.reason
+
+
+def test_jarak_entry_dilewati_bila_data_harga_tidak_dioper(tmp: Path) -> None:
+    """Pemanggil lama (tanpa atr/harga) tidak boleh berubah perilakunya."""
+    rm = _manager_jarak(tmp, 1.0)
+    assert rm.check(now=NOW, **{**BASE, "open_positions": 1}).allowed
+
+
 # -- runner --------------------------------------------------------------
 
 

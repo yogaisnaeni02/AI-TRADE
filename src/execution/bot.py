@@ -606,6 +606,11 @@ class TradingBot:
             size_tier=sig.get("size_tier", "full"),
             direction=sig["direction"],
             open_directions=arah_terbuka,
+            # Untuk gerbang jarak antar entry (pyramiding). Dibandingkan
+            # dengan harga buka posisi yang sudah ada.
+            atr=float(sig["atr"]),
+            harga=float(sig["entry"]),
+            harga_posisi=[p.price_open for p in posisi_terbuka],
         )
 
         if not decision.allowed:

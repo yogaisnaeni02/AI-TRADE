@@ -215,3 +215,78 @@ di 100 hari dua_arah tanpa konfluensi lebih tinggi totalnya (+60,6R vs
   memisahkan counter trade.
 - 100 hari = satu rezim pasar (emas naik ke ~4.700 lalu turun). Nilai t
   semua varian di bawah ambang ~3,0 proyek ini.
+
+---
+
+## 8. Jarak antar entry pyramiding — DIUKUR, TIDAK MENAIKKAN HASIL
+
+Rekomendasi nomor 3 `docs/AnalisaLog/KESIMPULAN-ANALISA-LOG-16SEP2026.md`:
+larang entry baru bila harga belum bergerak minimal 1x ATR dari posisi
+sebelumnya. Latarnya kejadian live 16 Sep: tujuh posisi BUY dibuka di
+4325-4327 dalam setengah jam, lalu koreksi 6 poin ke 4321 menyapu semuanya.
+
+**Implementasi:** `global.min_jarak_entry_atr` di `config/risk_limits.yaml`,
+default `0.0` (MATI, perilaku lama). Gerbangnya di `RiskManager.check()` -
+gerbang tunggal yang sama dipakai bot live dan `simulasi_live.py`, memakai
+harga sinyal, ATR sinyal, dan harga buka posisi yang sedang terbuka.
+
+### Hasil (halt DD dimatikan, equity awal Rp 5,5 jt)
+
+100 hari data Exness asli (1 Jun - 9 Sep 2026):
+```
+varian              jarak  entry   TP   SL     E[R]      t     totR    maxDD
+dua_arah                0    351  103  227   +0.173  +1.93   +60.61    22.6%
+dua_arah              0,5    348   97  230   +0.125  +1.41   +43.60    25.2%
+dua_arah              1,0    335   89  225   +0.080  +0.89   +26.76    27.0%
+dua_arah              1,5    299   78  207   +0.032  +0.34    +9.60    25.9%
+pyramid5                0    171   40  124   -0.072  -0.60   -12.23    61.7%
+pyramid5              0,5    100   19   76   -0.202  -1.35   -20.20    42.0%
+pyramid5              1,0     83   15   64   -0.235  -1.44   -19.52    37.6%
+pyramid5              1,5     59    9   47   -0.352  -1.98   -20.77    33.7%
+autoclose_agresif       0    170   34  113   -0.078  -0.69   -13.29    57.6%
+autoclose_agresif     0,5     98   17   70   -0.184  -1.26   -18.05    37.4%
+autoclose_agresif     1,0     87   14   63   -0.213  -1.40   -18.56    35.0%
+autoclose_agresif     1,5     65    9   48   -0.306  -1.87   -19.90    31.9%
+```
+
+30 hari (16 Agu - 15 Sep 2026):
+```
+varian              jarak  entry   TP   SL     E[R]      t     totR    maxDD
+dua_arah                0    106   26   73   -0.005  -0.03    -0.53    22.6%
+dua_arah              0,5    101   24   73   -0.067  -0.43    -6.73    29.5%
+dua_arah              1,0     86   17   64   -0.163  -1.00   -13.98    27.6%
+dua_arah              1,5     88   19   65   -0.152  -0.94   -13.33    25.8%
+pyramid5                0     81   16   63   -0.260  -1.64   -21.09    42.0%
+pyramid5              0,5     64   11   51   -0.327  -1.88   -20.93    35.1%
+pyramid5              1,0    171   41  121   -0.036  -0.30    -6.23    32.2%
+pyramid5              1,5    153   36  109   -0.071  -0.56   -10.85    25.6%
+autoclose_agresif       0     87   16   64   -0.228  -1.52   -19.86    40.3%
+autoclose_agresif     0,5     62   10   48   -0.325  -1.89   -20.13    34.2%
+autoclose_agresif     1,0     91   15   65   -0.236  -1.63   -21.46    33.5%
+autoclose_agresif     1,5    109   19   76   -0.193  -1.44   -21.02    33.2%
+```
+
+### Kesimpulan
+
+1. **Hasilnya tidak naik.** Di 100 hari ketiga varian MEMBURUK dan monoton
+   seiring jarak diperbesar. Yang paling telak: dua_arah +60,61R -> +9,60R.
+   Aturan ini membuang entry yang berdekatan - dan di periode ini, kelompok
+   entry berdekatan itu termasuk yang berujung TP, bukan hanya yang disapu.
+2. **Yang konsisten membaik adalah drawdown varian pyramid:** 61,7% ->
+   33,7% (pyramid5) dan 57,6% -> 31,9% (agresif) di 100 hari; 42,0% ->
+   25,6% di 30 hari. Jadi ini alat KONTROL RISIKO, bukan perbaikan profit.
+3. **Angka pyramid5 di 30 hari (1,0 dan 1,5) tidak boleh dibaca sebagai
+   bukti.** Tanpa jarak, equity menembus `min_equity_idr` pada 26 Agu dan
+   bot terblokir sisa periode; dengan jarak ia tidak pernah terblokir,
+   sehingga yang dibandingkan bukan periode yang sama. Efek jalur, bukan
+   efek aturan.
+4. Karena itu flag **DIBIARKAN MATI** dan tidak dipasang di varian mana pun.
+   Kodenya siap dipakai bila pemilik memilih menukar return dengan drawdown.
+
+**Yang perlu disadari:** aturan ini memang akan mencegah kejadian 16 Sep
+(tujuh entry dalam 30 menit di rentang 2 dolar). Tetapi pada data yang
+lebih panjang ia juga memotong kelompok entry yang menguntungkan, sehingga
+tidak menyelesaikan sebab kerugian - hanya memperkecil ukuran taruhannya.
+Penyebab yang belum disentuh: sisi sell tanpa edge, tidak ada filter
+konfluensi, dan tidak ada filter overextension (rekomendasi 1, 2, 4, 5
+dokumen analisa).

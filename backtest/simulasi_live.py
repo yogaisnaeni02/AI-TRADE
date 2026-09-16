@@ -169,6 +169,7 @@ class Opsi:
     equity: float = 5_500_000.0
     tanpa_halt_dd: bool = False
     autoclose_bar: Optional[str] = None
+    jarak_atr: Optional[float] = None
 
 
 @dataclass
@@ -212,6 +213,8 @@ def jalankan_varian(nama: str, data: DataSimulasi, settings: dict, risk: dict, o
         # Sama dengan bandingkan_varian.py: halt DD memotong PERIODE, bukan
         # guardrail harian yang memang bagian dari strategi (docs/38).
         rk["global"]["max_drawdown_percent"] = 1e5
+    if opsi.jarak_atr is not None:
+        rk["global"]["min_jarak_entry_atr"] = opsi.jarak_atr
 
     param = ParamPosisi.dari_config(cfg)
     eng = RuleEngine(config=cfg)
@@ -288,6 +291,8 @@ def jalankan_varian(nama: str, data: DataSimulasi, settings: dict, risk: dict, o
                 spread_points=spr_pts, open_positions=len(buka),
                 confidence=min(1.0, s.score / 10.0), size_tier=s.size_tier,
                 direction=s.direction, open_directions=[p.arah for p in buka],
+                atr=float(s.atr), harga=float(s.entry),
+                harga_posisi=[p.entry for p in buka],
             )
             if not d.allowed:
                 tolak["".join("N" if ch.isdigit() else ch for ch in d.reason)] += 1
@@ -507,6 +512,8 @@ def main() -> int:
                     help="timpa position_management.autoclose_bar untuk semua varian")
     ap.add_argument("--tanpa-halt-dd", action="store_true",
                     help="matikan HANYA halt drawdown global (metode bandingkan_varian.py)")
+    ap.add_argument("--jarak-atr", type=float, default=None,
+                    help="timpa global.min_jarak_entry_atr (jarak minimal antar entry)")
     ap.add_argument("--equity", type=float, default=Opsi.equity)
     ap.add_argument("--mingguan", action="store_true", help="rincian per minggu")
     ap.add_argument("--detail", action="store_true", help="cetak tiap trade")
@@ -529,9 +536,11 @@ def main() -> int:
     print(f"Jendela {data.start + WIB:%d %b %Y %H:%M} -> {data.end + WIB:%d %b %Y %H:%M} WIB | "
           f"{n_bar} bar M5, {bar_m1 / n_bar:.0%} punya data M1 | equity awal {rp(args.equity)} | "
           + ("halt DD dimatikan" if args.tanpa_halt_dd else "semua rem aktif")
-          + (f" | autoclose_bar={args.autoclose_bar}" if args.autoclose_bar else ""))
+          + (f" | autoclose_bar={args.autoclose_bar}" if args.autoclose_bar else "")
+          + (f" | jarak entry {args.jarak_atr:g}xATR" if args.jarak_atr is not None else ""))
 
-    opsi = Opsi(equity=args.equity, tanpa_halt_dd=args.tanpa_halt_dd, autoclose_bar=args.autoclose_bar)
+    opsi = Opsi(equity=args.equity, tanpa_halt_dd=args.tanpa_halt_dd,
+                autoclose_bar=args.autoclose_bar, jarak_atr=args.jarak_atr)
     hasil = []
     for name in names:
         res = jalankan_varian(name, data, settings, risk, opsi)
