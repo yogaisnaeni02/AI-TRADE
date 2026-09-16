@@ -121,7 +121,7 @@ def tulis_gabungan(tujuan: Optional[Path] = None) -> Path:
     File ini TURUNAN - boleh dihapus kapan saja dan dibangun ulang dari
     file per-PC. Jangan jadikan sumber kebenaran, dan jangan di-commit.
     """
-    tujuan = tujuan or (LOG_DIR / "trades_gabungan.csv")
+    tujuan = tujuan or (ROOT / "docs" / "AnalisaLog" / "trades_gabungan.csv")
     rows = baca_semua()
     if not rows:
         return tujuan
@@ -132,7 +132,7 @@ def tulis_gabungan(tujuan: Optional[Path] = None) -> Path:
             if k not in kolom:
                 kolom.append(k)
 
-    LOG_DIR.mkdir(exist_ok=True)
+    tujuan.parent.mkdir(parents=True, exist_ok=True)
     with open(tujuan, "w", encoding="utf-8", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=kolom, extrasaction="ignore")
         w.writeheader()
