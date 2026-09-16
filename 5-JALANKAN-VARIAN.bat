@@ -65,7 +65,8 @@ python -c "import sys; sys.path.insert(0,'.'); from src.variants import list_var
 if errorlevel 1 (
     echo.
     echo !! Varian "%VARIAN%" tidak dikenal - periksa ejaannya.
-    echo    Perhatikan: nama varian TIDAK memakai garis bawah.
+    echo    Salin persis dari daftar di atas, termasuk garis bawahnya
+    echo    ^(contoh: dua_arah_konfluensi, uji_konfluensi^).
     echo.
     goto pilih_varian
 )
