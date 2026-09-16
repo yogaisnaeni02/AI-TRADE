@@ -283,10 +283,129 @@ autoclose_agresif     1,5    109   19   76   -0.193  -1.44   -21.02    33.2%
 4. Karena itu flag **DIBIARKAN MATI** dan tidak dipasang di varian mana pun.
    Kodenya siap dipakai bila pemilik memilih menukar return dengan drawdown.
 
-**Yang perlu disadari:** aturan ini memang akan mencegah kejadian 16 Sep
+**Catatan:** aturan ini memang akan mencegah kejadian 16 Sep
 (tujuh entry dalam 30 menit di rentang 2 dolar). Tetapi pada data yang
 lebih panjang ia juga memotong kelompok entry yang menguntungkan, sehingga
 tidak menyelesaikan sebab kerugian - hanya memperkecil ukuran taruhannya.
 Penyebab yang belum disentuh: sisi sell tanpa edge, tidak ada filter
 konfluensi, dan tidak ada filter overextension (rekomendasi 1, 2, 4, 5
 dokumen analisa).
+
+---
+
+## 9. Walk-forward: apakah "varian yang sedang bagus" bertahan?
+
+Permintaan pemilik: latih di beberapa bulan, uji di bulan berikutnya, ambil
+hasilnya, lalu ulangi siklusnya.
+
+**Alat:** `backtest/walk_forward.py`. Di tiap lipatan, semua kandidat
+dijalankan pada periode LATIH, satu dipilih menurut kriteria yang dinyatakan
+di muka, lalu HANYA pilihan itu dijalankan pada periode UJI yang belum
+pernah dilihat. Equity dibawa maju antar lipatan. Pembandingnya: tiap varian
+TETAP dijalankan pada periode uji yang sama persis.
+
+Periode uji tidak pernah memuat satu bar pun dari periode latihnya - itu
+dikunci tes (`tests/test_walk_forward.py`).
+
+```bash
+python backtest/walk_forward.py --dari 2026-06-01 --sampai 2026-09-09 \
+    --latih 30 --uji 14 --tanpa-halt-dd
+```
+
+### Hasil pada data Exness asli 1 Jun - 9 Sep 2026 (M1 penuh)
+
+Total R di periode UJI saja, halt DD dimatikan, equity awal Rp 5,5 jt:
+
+```
+                            latih 30 / uji 14      latih 30 / uji 14   latih 45 / uji 21
+strategi                    pilih totR (5 lipatan)  pilih E[R]          pilih totR (2 lipatan)
+pemilih walk-forward              +15,06R               +16,97R               +3,99R
+tetap baseline                    +30,31R               +30,31R              +45,78R
+tetap konfluensi                  +19,38R               +19,38R               +9,49R
+tetap dua_arah                    +38,53R               +38,53R              +58,10R
+tetap dua_arah_konfluensi         +32,81R               +32,81R              +29,36R
+tetap autoclose                   +18,82R               +18,82R              +41,76R
+tetap pyramid5                    -18,59R               -18,59R              -24,40R
+tetap autoclose_agresif           -17,77R               -17,77R              -22,16R
+```
+
+Varian yang terpilih tiap lipatan berganti-ganti: dengan kriteria total R
+dua_arah 2x, dua_arah_konfluensi 2x, autoclose 1x; dengan kriteria E[R]
+konfluensi 2x, lalu dua_arah, baseline, dua_arah_konfluensi masing-masing 1x.
+
+Korelasi nilai latih terhadap hasil uji pada lipatan 30/14: **+0,11**
+(kriteria E[R]) dan +0,61 (kriteria total R), dari 5 lipatan. Run 45/21
+tidak dilaporkan korelasinya - hanya 2 lipatan, dan korelasi dua titik
+selalu +-1,00.
+
+### Hasil pada 1,4 tahun (1 Mei 2025 - 9 Sep 2026), latih 60 -> uji 30
+
+14 lipatan, total R di periode UJI saja:
+
+```
+strategi                    entry   TP    SL    WR     E[R]      t      totR   equity akhir
+pemilih walk-forward         1670  393  1120   32%   +0.066  +1.67   +109.36    Rp 13,97 jt
+tetap konfluensi              748  225   480   36%   +0.213  +3.48   +159.36    Rp 23,36 jt
+tetap dua_arah_konfluensi    1133  305   767   32%   +0.098  +1.99   +110.81    Rp 14,21 jt
+tetap baseline                959  256   645   33%   +0.092  +1.76    +88.33    Rp 14,46 jt
+tetap dua_arah                178   23   127   29%   -0.130  -1.18    -23.15     Rp 3,99 jt
+tetap autoclose               178   21   113   35%   -0.133  -1.31    -23.71     Rp 4,00 jt
+tetap pyramid5                648   85   438   32%   -0.052  -0.90    -33.72     Rp 3,99 jt
+```
+
+Terpilih: konfluensi 5x, dua_arah_konfluensi 3x, pyramid5 2x, dua_arah 2x,
+autoclose 1x, baseline 1x. Lipatan dengan hasil uji positif: 8 dari 14.
+**Korelasi nilai latih vs hasil uji: -0,07.**
+
+Dua hal yang WAJIB dibaca bersama tabel itu:
+- Periode ini memakai resolusi M5 saja (data M1 baru ada sejak 29 Mei 2026),
+  jadi eksekusi di dalam bar lebih kasar daripada run 3,5 bulan di atas.
+- dua_arah, autoclose, dan pyramid5 BERHENTI di tengah periode karena equity
+  menembus `min_equity_idr` (equity akhir ~Rp 4 jt, entry-nya ikut terpotong
+  jadi 178). Angka mereka bukan hasil periode penuh.
+
+### Kesimpulan
+
+1. **Pemilih otomatis kalah dari varian tetap terbaik di keempat
+   konfigurasi yang diuji**, dengan dua kriteria pemilihan dan tiga panjang
+   jendela:
+
+   ```
+   konfigurasi                       pemilih     varian tetap terbaik
+   latih 30 / uji 14, pilih totR     +15,06R     dua_arah      +38,53R
+   latih 30 / uji 14, pilih E[R]     +16,97R     dua_arah      +38,53R
+   latih 45 / uji 21, pilih totR      +3,99R     dua_arah      +58,10R
+   latih 60 / uji 30, pilih totR    +109,36R     konfluensi   +159,36R
+   ```
+
+2. **Nilai periode latih tidak meramalkan periode uji.** Korelasinya -0,07
+   pada sampel terbesar (14 lipatan). Pemilihnya bukan "salah pilih" - tidak
+   ada yang bisa dipilih: yang diukur di periode latih sebagian besar
+   kebisingan.
+
+3. **Kriteria total R berbahaya.** Dua kali ia memilih pyramid5 karena total
+   R latihnya paling besar (+106,46 dan +108,48) - padahal itu datang dari
+   452 dan 306 entry, bukan dari keunggulan per trade. Hasil ujinya +54,11R
+   lalu -13,17R. Memilih menurut total R berarti memilih varian yang paling
+   banyak bertaruh.
+
+4. **Pemilih tidak buruk secara absolut** (+109,36R, mengalahkan baseline
+   tetap +88,33R) - ia hanya tidak lebih baik daripada memilih satu varian
+   bagus lalu mendiamkannya. Ongkos gonta-gantinya nyata: 1.670 entry untuk
+   hasil yang di bawah konfluensi dengan 748 entry.
+
+5. **Untuk ide "kepala bot yang memilih varian otomatis": tidak ada
+   dasarnya.** Yang terukur justru kebalikannya - pilih SATU varian,
+   diamkan. Di 14 periode uji berturut-turut, konfluensi tetap memberi
+   +159,36R dengan t +3,48; itu satu-satunya angka di seluruh pengukuran
+   dokumen ini yang melewati ambang ~3,0 (docs/30).
+
+6. Ini **memperkuat rekomendasi 2 dokumen analisa** (`confluence_filter:
+   true`) dari arah yang berbeda: bukan dari satu periode penuh yang dipakai
+   memilih, melainkan dari 14 periode uji yang tidak pernah dilihat saat
+   memilih.
+
+**Batasnya:** satu instrumen, satu rezim panjang (emas naik kuat sepanjang
+periode), dan tiga varian pembanding berhenti di tengah jalan karena equity.
+Angka ini bukan janji hasil ke depan - ia hanya menutup satu pertanyaan:
+memilih varian dari performa terakhir tidak terbukti berguna.
