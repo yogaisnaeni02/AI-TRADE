@@ -319,6 +319,92 @@ varian:
       weekly:
         max_loss_percent: 45.0
 
+  # ---------------------------------------------------------------------
+  # VARIAN UJI SEMENTARA - khusus akun DEMO, HAPUS setelah testing selesai
+  #
+  # Salinan persis empat varian di atas dengan SATU perbedaan: halt
+  # drawdown global dimatikan (max_drawdown_percent 100). Tujuannya
+  # mengumpulkan data tanpa bot berhenti permanen di tengah jalan. Batas 12
+  # trade/hari, 3 loss beruntun, rugi harian 4% dan mingguan 8% TETAP aktif.
+  #
+  # Kenapa HANYA halt DD yang dimatikan (docs/70 bagian 10, 100 hari Exness):
+  #   semua rem aktif     : keempat varian HALT di awal, cuma 23-77 entry
+  #   halt DD dimatikan   : baseline +33,70R  konfluensi +32,61R
+  #                         dua_arah +60,61R  dua_arah_konfluensi +50,11R
+  #   batas trade dibuka  : LEBIH BURUK di dua periode - 57 trade tambahan,
+  #                         semua masuk di hari yang sudah untung & panas
+  #                         (>=3 TP), hanya 3 yang menang, total -45,9R
+  #   tanpa batas apa pun : dua varian dua arah kehabisan modal
+  #
+  # Magic sendiri supaya journal dan sidik jari tidak tercampur dengan
+  # varian aslinya. JANGAN ke akun real: tanpa halt, drawdown terukur ~24%.
+  # ---------------------------------------------------------------------
+
+  uji_baseline:
+    magic: 20260917
+    deskripsi: >
+      baseline tanpa halt drawdown permanen - khusus uji demo.
+    status: uji-demo-sementara
+    dokumen: docs/70-SIMULASI-LIVE-DAN-PERBAIKAN-REM.md
+    peringatan: >
+      Halt drawdown 20% DIMATIKAN. Hanya akun demo; hapus setelah uji.
+    override:
+      momentum_fib:
+        allow_sell: false
+        confluence_filter: false
+    override_risk:
+      global:
+        max_drawdown_percent: 100.0
+
+  uji_konfluensi:
+    magic: 20260918
+    deskripsi: >
+      konfluensi tanpa halt drawdown permanen - khusus uji demo.
+    status: uji-demo-sementara
+    dokumen: docs/70-SIMULASI-LIVE-DAN-PERBAIKAN-REM.md
+    peringatan: >
+      Halt drawdown 20% DIMATIKAN. Hanya akun demo; hapus setelah uji.
+    override:
+      momentum_fib:
+        allow_sell: false
+        confluence_filter: true
+    override_risk:
+      global:
+        max_drawdown_percent: 100.0
+
+  uji_dua_arah:
+    magic: 20260919
+    deskripsi: >
+      dua_arah tanpa halt drawdown permanen - khusus uji demo.
+    status: uji-demo-sementara
+    dokumen: docs/70-SIMULASI-LIVE-DAN-PERBAIKAN-REM.md
+    peringatan: >
+      Halt drawdown 20% DIMATIKAN. Hanya akun demo; hapus setelah uji.
+      Sisi sell tetap belum punya edge terbukti (docs/43).
+    override:
+      momentum_fib:
+        allow_sell: true
+        confluence_filter: false
+    override_risk:
+      global:
+        max_drawdown_percent: 100.0
+
+  uji_dua_arah_konfluensi:
+    magic: 20260920
+    deskripsi: >
+      dua_arah_konfluensi tanpa halt drawdown permanen - khusus uji demo.
+    status: uji-demo-sementara
+    dokumen: docs/70-SIMULASI-LIVE-DAN-PERBAIKAN-REM.md
+    peringatan: >
+      Halt drawdown 20% DIMATIKAN. Hanya akun demo; hapus setelah uji.
+    override:
+      momentum_fib:
+        allow_sell: true
+        confluence_filter: true
+    override_risk:
+      global:
+        max_drawdown_percent: 100.0
+
   ml_walkforward:
     magic: 20260913
     deskripsi: >

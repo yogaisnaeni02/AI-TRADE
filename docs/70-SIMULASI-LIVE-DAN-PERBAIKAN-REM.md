@@ -409,3 +409,77 @@ Dua hal yang WAJIB dibaca bersama tabel itu:
 periode), dan tiga varian pembanding berhenti di tengah jalan karena equity.
 Angka ini bukan janji hasil ke depan - ia hanya menutup satu pertanyaan:
 memilih varian dari performa terakhir tidak terbukti berguna.
+
+---
+
+## 10. Rem mana yang boleh dibuka untuk testing di demo
+
+Pertanyaan pemilik: untuk menguji baseline, konfluensi, dua_arah, dan
+dua_arah_konfluensi, bisakah trade dibuat tanpa batas - "kalau market lagi
+oke dan banyak kena TP, biarkan mengalir"?
+
+### Empat skenario (total R, equity awal Rp 5,5 jt, maxpos 2 di semuanya)
+
+- **S0** seperti live: 12 trade/hari, 3 loss beruntun, rugi harian 4%,
+  mingguan 8%, halt drawdown 20% permanen
+- **S1** batas jumlah trade dibuka, rem lain tetap
+- **S2** S1 + halt drawdown dimatikan
+- **S3** tanpa batas sama sekali
+
+100 hari data Exness (1 Jun - 9 Sep 2026):
+```
+varian               S0 (live)          S1            S2          S3
+baseline             +0,0  HALT 23 e.   = S0          +26,70R     +17,34R
+konfluensi           +5,5  HALT 77 e.   = S0          +25,61R     +20,05R
+dua_arah             +0,1  HALT 52 e.   = S0          +51,76R     -19,42R modal habis
+dua_arah_konfluensi  -0,6  HALT 41 e.   = S0          +43,11R     -19,22R modal habis
+```
+
+30 hari (16 Agu - 15 Sep 2026): S3 paling buruk di keempat varian
+(baseline dan dua_arah kehabisan modal); S1 menurunkan konfluensi
++9,94 -> +5,94R dan dua_arah_konfluensi +21,01 -> +16,01R.
+
+Pembanding yang menentukan - **halt DD dimatikan tetapi batas 12
+trade/hari DIPERTAHANKAN** (bagian 4): 100 hari baseline +33,70R,
+konfluensi +32,61R, dua_arah +60,61R, dua_arah_konfluensi +50,11R. Lebih
+baik dari S2 di keempat varian (sekitar 7-9R), juga di 30 hari.
+
+### Hipotesis "let it flow" diuji langsung
+
+Diambil trade yang HANYA terjadi karena batas 12/hari dibuka, dipecah
+menurut kondisi hari tepat saat entry (`scratchpad` analisa, halt DD mati):
+
+```
+varian               100 hari                      30 hari
+baseline             8 trade, 8 SL, -8,00R         tidak ada
+konfluensi           7 trade, 7 SL, -7,00R         4 trade, 4 SL, -4,00R
+dua_arah             21 trade, 3 menang, -9,87R    5 trade, 5 SL, -5,00R
+dua_arah_konfluensi  7 trade, 7 SL, -7,00R         5 trade, 5 SL, -5,00R
+```
+
+**Seluruh 57 trade tambahan masuk di hari yang sudah untung dan sudah
+"panas" (>=3 TP).** Hanya 3 yang menang, total -45,9R.
+
+Mekanismenya: hari yang sampai menutup 12 trade adalah hari dengan gerakan
+besar yang SUDAH berjalan jauh. Trade ke-13 dan seterusnya masuk di ujung
+gerakan, saat momentum habis. Pola yang sama tercatat live 16 Sep
+(`docs/AnalisaLog`): sesi BUY dibuka 2 TP, lalu 14 SL beruntun karena bot
+terus membeli di pucuk. Batas harian di sini memotong entry kesiangan,
+bukan profit.
+
+Batasnya jujur: batas 12 hanya kena di 1-4 hari per varian, dan hari-hari
+itu sebagian sama antar varian - bukan 57 bukti independen. Tetapi polanya
+seragam di dua periode dan empat varian, dan cocok dengan kejadian live.
+
+### Kesimpulan dan yang dipasang
+
+1. Yang menghentikan testing adalah **halt drawdown permanen**, bukan batas
+   jumlah trade.
+2. **Batas 12 trade/hari dan rem rugi dipertahankan.**
+3. Empat varian uji dengan magic sendiri di `config/variants.yaml` -
+   `uji_baseline`, `uji_konfluensi`, `uji_dua_arah`,
+   `uji_dua_arah_konfluensi` - identik dengan induknya kecuali
+   `max_drawdown_percent: 100`. Khusus demo, hapus setelah testing.
+4. Arah yang layak diuji berikutnya untuk "hari panas" adalah kebalikan
+   dari membuka batas: filter overextension (rekomendasi 4 dokumen
+   AnalisaLog) - menahan entry saat gerakan sudah terlalu jauh.
