@@ -216,15 +216,27 @@ varian:
       stabilitas: "positif kedua paruh (+0,013 / +0,025)"
       kena: "237 dari 1440 trade (16,5%)"
     peringatan: >
-      Perbaikannya TIPIS: +0,018R per trade (~6%), dan nilai t justru turun
-      sedikit (5,92 -> 5,82). Ini mengunci profit, bukan menemukan edge
-      baru. Jangan berharap perubahan besar.
+      DIUKUR ULANG seperti bot live (backtest/simulasi_live.py, docs/70):
+      auto-close KALAH dari induknya dua_arah - 100 hari data Exness +47,2R
+      vs +60,6R, 30 hari -11,6R vs -0,5R. Ia lebih sering memotong trade
+      yang akan TP daripada menyelamatkan yang akan SL. Angka +0,018R di
+      bawah diukur tanpa memodelkan cara bot menilai skor, jadi tidak
+      berlaku untuk bot live. Pertimbangkan menghentikan varian ini.
     override:
       momentum_fib:
         allow_sell: true
         confluence_filter: false
       position_management:
         autoclose_score_drop: 20
+        # Skor dinilai di bar M5 yang SUDAH TUTUP, bukan bar yang sedang
+        # terbentuk (candle dan momentum berkedip selama bar berjalan).
+        # Diukur dengan backtest/simulasi_live.py, halt DD mati (docs/70):
+        #                            bar berjalan  bar tutup  tanpa autoclose
+        #   100 hari Exness (Jun-Sep)    +44,38R     +47,17R    +60,61R
+        #   30 hari (16 Agu-15 Sep)      -15,66R     -11,61R     -0,53R
+        # Bar tutup lebih baik di kedua periode, tetapi tetap kalah dari
+        # tanpa auto-close - lihat peringatan.
+        autoclose_bar: tutup
 
   autoclose_agresif:
     magic: 20260916
@@ -284,6 +296,15 @@ varian:
         fib_sell_max: 0.30
       position_management:
         autoclose_score_drop: 15
+        # Bar tutup, bukan bar berjalan (docs/70). Diukur, halt DD mati:
+        #                     bar berjalan        bar tutup           pyramid5
+        #   100 hari Exness   -16,27R (467 entry) -13,29R (170 entry) -12,23R
+        #   30 hari           -22,85R (162 entry) -19,86R  (87 entry) -21,09R
+        # Di bar berjalan, auto-close sering menutup dengan untung beberapa
+        # ratus rupiah; satu posisi untung itu membuat batch "tidak rugi
+        # semua", sehingga rem 3 batch rugi tidak pernah menyala dan entry
+        # membengkak. Di bar tutup rem batch kembali bekerja.
+        autoclose_bar: tutup
     override_risk:
       global:
         max_open_positions: 10

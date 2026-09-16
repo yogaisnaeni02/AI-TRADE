@@ -88,6 +88,17 @@ def signal_config(settings: dict, risk: dict, min_score: int) -> dict:
     for which, path in SIGNAL_KEYS:
         out[f"{which}.{'.'.join(path)}"] = _dig(src[which], path)
 
+    # Auto-close menentukan kapan posisi DITUTUP, jadi ikut sidik jari -
+    # tetapi hanya bila aktif, supaya hash varian tanpa auto-close (termasuk
+    # forward test settings.yaml) tidak berubah karena kunci ini ditambahkan.
+    pm = settings.get("position_management", {}) or {}
+    drop = int(pm.get("autoclose_score_drop", 0) or 0)
+    if drop > 0:
+        out["settings.position_management.autoclose_score_drop"] = drop
+        out["settings.position_management.autoclose_bar"] = str(
+            pm.get("autoclose_bar", "berjalan")
+        ).lower()
+
     # Jam sesi ikut menentukan sinyal tetapi tinggal di kode, bukan config.
     try:
         from .strategy.sessions import SESSIONS
@@ -136,7 +147,7 @@ def describe(settings: dict, risk: dict, min_score: int) -> str:
         bagian.append("konfluensi=ON")
     drop = int(pm.get("autoclose_score_drop", 0) or 0)
     if drop > 0:
-        bagian.append(f"autoclose=turun{drop}")
+        bagian.append(f"autoclose=turun{drop}/bar-{pm.get('autoclose_bar', 'berjalan')}")
     if str(dy.get("loss_mode", "trade")).lower() == "batch":
         bagian.append(f"loss=batch/{dy.get('max_consecutive_loss_batches', 3)}")
 
