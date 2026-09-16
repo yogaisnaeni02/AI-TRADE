@@ -63,6 +63,11 @@ from backtest.simulasi_live import (  # noqa: E402
 from src.variants import list_variants  # noqa: E402
 
 
+# Di bawah ini korelasi latih-vs-uji tidak dilaporkan: dua titik selalu
+# menghasilkan +-1,00, tiga titik hampir selalu ekstrem.
+MIN_LIPATAN_KORELASI = 5
+
+
 @dataclass
 class Lipatan:
     no: int
@@ -245,9 +250,16 @@ def main() -> int:
     print("\nVarian terpilih: " + ", ".join(f"{n} {c}x" for n, c in dipilih.items()))
     benar = sum(1 for b in baris_lipatan if b["uji_R"] > 0)
     print(f"Lipatan dengan hasil uji positif: {benar}/{len(baris_lipatan)}")
-    korelasi = pd.DataFrame(baris_lipatan)[["latih", "uji_R"]].corr().iloc[0, 1]
-    print(f"Korelasi nilai latih vs hasil uji: {korelasi:+.2f} "
-          "(mendekati nol = performa terakhir tidak meramalkan periode berikutnya)")
+    # Korelasi dari segelintir titik TIDAK bermakna - dua titik selalu
+    # memberi +-1,00, dan angka itu terlihat meyakinkan padahal kosong.
+    # Lebih baik tidak dicetak daripada dibaca sebagai bukti.
+    if len(baris_lipatan) >= MIN_LIPATAN_KORELASI:
+        korelasi = pd.DataFrame(baris_lipatan)[["latih", "uji_R"]].corr().iloc[0, 1]
+        print(f"Korelasi nilai latih vs hasil uji: {korelasi:+.2f} "
+              "(mendekati nol = performa terakhir tidak meramalkan periode berikutnya)")
+    else:
+        print(f"Korelasi latih vs uji tidak dicetak: baru {len(baris_lipatan)} lipatan "
+              f"(minimal {MIN_LIPATAN_KORELASI}); dari sesedikit itu angkanya tidak bermakna.")
 
     if args.csv:
         pd.DataFrame([{k: v for k, v in p.__dict__.items() if k != "info"}
