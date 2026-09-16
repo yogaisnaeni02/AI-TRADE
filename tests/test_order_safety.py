@@ -18,31 +18,23 @@ Fokus pada tiga perbaikan 10 Sep 2026:
 from __future__ import annotations
 
 import sys
-import types
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 # -- palsukan MetaTrader5 sebelum modul apa pun mengimpornya -------------
+#
+# Lewat helper BERSAMA: `pytest tests/` mengimpor beberapa file tes dalam
+# satu proses, dan modul produksi mengikat `mt5` saat diimpor pertama kali.
+# Kalau tiap file tes memasang objek palsunya sendiri, file yang diimpor
+# belakangan menambal objek yang tidak dipakai modul produksi - lihat
+# tests/mt5_palsu.py.
 
-RETCODE_DONE = 10009
+from tests.mt5_palsu import pasang  # noqa: E402
 
-fake = types.ModuleType("MetaTrader5")
-fake.TRADE_RETCODE_DONE = RETCODE_DONE
-fake.TRADE_ACTION_DEAL = 1
-fake.TRADE_ACTION_SLTP = 2
-fake.ORDER_TYPE_BUY = 0
-fake.ORDER_TYPE_SELL = 1
-fake.POSITION_TYPE_BUY = 0
-fake.POSITION_TYPE_SELL = 1
-fake.ORDER_FILLING_IOC = 1
-fake.ORDER_FILLING_FOK = 2
-fake.ORDER_FILLING_RETURN = 3
-fake.ORDER_TIME_GTC = 0
-fake.DEAL_TYPE_BUY = 0
-fake.last_error = lambda: (0, "ok")
-sys.modules["MetaTrader5"] = fake
+fake = pasang()
+RETCODE_DONE = fake.TRADE_RETCODE_DONE
 
 from src.execution import order_manager as OM  # noqa: E402
 

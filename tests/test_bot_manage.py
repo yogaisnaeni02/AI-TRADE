@@ -26,18 +26,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 # -- palsukan MetaTrader5 sebelum modul apa pun mengimpornya -------------
 
-fake = types.ModuleType("MetaTrader5")
-for i, nama in enumerate(("TIMEFRAME_M1", "TIMEFRAME_M5", "TIMEFRAME_M15",
-                          "TIMEFRAME_H1", "TIMEFRAME_H4"), start=1):
-    setattr(fake, nama, i)
-fake.POSITION_TYPE_BUY, fake.POSITION_TYPE_SELL = 0, 1
-fake.DEAL_TYPE_BUY = 0
-fake.TRADE_RETCODE_DONE = 10009
-fake.last_error = lambda: (0, "ok")
-fake.symbol_info_tick = lambda symbol: types.SimpleNamespace(
-    time=int(time.time()), bid=4400.0, ask=4400.26)
-fake.history_deals_get = lambda a, b: None
-sys.modules["MetaTrader5"] = fake
+# Helper bersama - lihat tests/mt5_palsu.py: `pytest tests/` mengimpor semua
+# file tes dalam satu proses, jadi objek palsunya harus SATU.
+from tests.mt5_palsu import pasang  # noqa: E402
+
+fake = pasang()
 
 from src.monitoring import notifier  # noqa: E402
 
@@ -94,6 +87,13 @@ def posisi(ticket, harga=4400.0, sl=4395.74, tipe=0, waktu=None):
 
 
 def buat_bot(varian: str, tmp: Path):
+    # Modul palsu dipakai bersama file tes lain yang menambal fungsi yang
+    # sama; pasang ulang yang dibutuhkan di sini supaya urutan impor pytest
+    # tidak menentukan hasil.
+    fake.symbol_info_tick = lambda symbol: types.SimpleNamespace(
+        time=int(time.time()), bid=4400.0, ask=4400.26)
+    fake.history_deals_get = lambda a, b: None
+
     bot = B.TradingBot(variant=varian)
     bot.log_path = tmp / "bot.log"
     bot.catatan = []
