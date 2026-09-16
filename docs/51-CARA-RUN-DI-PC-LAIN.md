@@ -47,6 +47,33 @@ cd "lokasi\folder\AI-TRADE"
 git pull
 ```
 
+### Aturan sebelum pull atau push
+
+Jangan langsung menjalankan `git pull` atau `git push` saat bot sedang
+menulis hasil. Jalankan dulu:
+
+```
+6-KIRIM-LOG.bat
+```
+
+Skrip ini membuat laporan Markdown baru di `docs/AnalisaLog/` sebelum
+sinkronisasi. Nama file memakai nama PC dan waktu, misalnya
+`LOG-PC-RUMAH-20260916-143000.md`, sehingga laporan lama tidak ditimpa
+dan dua PC tidak menulis file yang sama.
+
+Urutannya:
+
+1. Periksa status bot, snapshot, dan jumlah trade lokal.
+2. Buat laporan baru di `docs/AnalisaLog/`.
+3. Pull perubahan dari PC lain.
+4. Push journal PC ini dan laporan barunya.
+5. Buat hasil gabungan trade di `docs/AnalisaLog/trades_gabungan.csv`.
+
+Data runtime bot tetap berada di `logs/`. Folder `docs/AnalisaLog/` adalah
+arsip hasil dan analisis, bukan sumber data yang dibaca bot. Gunakan satu
+laporan baru untuk setiap sesi pull/push; jangan memakai satu file Markdown
+yang terus ditimpa.
+
 ---
 
 ## 3. Siapkan Python
@@ -215,10 +242,12 @@ File yang bisa dilihat langsung:
 
 | File | Isi |
 |---|---|
-| `logs/trades.csv` | Riwayat trade (ada kolom `varian` dan `magic`) |
+| `logs/trades__<nama-pc>.csv` | Riwayat trade PC ini (ada kolom `varian` dan `magic`) |
 | `logs/snapshot.json` | Kondisi terkini; `timestamp` diperbarui tiap siklus |
 | `logs/bot_YYYYMMDD.log` | Log harian bot |
 | `logs/risk_state.json` | Puncak equity dan status halt |
+| `docs/AnalisaLog/LOG-*.md` | Laporan bot dan trade sebelum pull/push |
+| `docs/AnalisaLog/trades_gabungan.csv` | Hasil gabungan semua PC, turunan dari journal |
 
 ---
 
