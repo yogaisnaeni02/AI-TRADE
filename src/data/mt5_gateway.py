@@ -16,6 +16,8 @@ from typing import Optional
 import MetaTrader5 as mt5
 import yaml
 
+from .offset_server import PelacakOffset, ukur
+
 CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "settings.yaml"
 
 
@@ -126,10 +128,12 @@ class MT5Gateway:
         self.disconnect()
 
 
-def detect_server_offset_hours() -> int:
+_PELACAK_OFFSET: Optional[PelacakOffset] = None
+
+
+def detect_server_offset_hours(strict: bool = False) -> int:
     """
-    Deteksi offset waktu server MT5 terhadap UTC, langsung dari tick
-    terkini — bukan angka statis di config.
+    Offset waktu server MT5 terhadap UTC, diukur dari tick terkini.
 
     Offset statis berbahaya: broker bisa menggeser jam server (DST, migrasi
     server) tanpa pemberitahuan. Saat itu terjadi, offset lama membuat bot
@@ -139,12 +143,18 @@ def detect_server_offset_hours() -> int:
 
     CATATAN PERBANDINGAN (10 Sep 2026): versi sebelumnya memakai
     `datetime.fromtimestamp()` vs `datetime.now()`, yaitu dua nilai waktu
-    LOKAL. Suku offset laptop kebetulan saling meniadakan sehingga hasilnya
-    tetap benar, tetapi hanya secara kebetulan dan tidak jelas terbaca.
-    Sekarang perbandingannya eksplisit di UTC sehingga tidak bergantung
-    pada zona waktu mesin yang menjalankan bot.
+    LOKAL. Sekarang perbandingannya eksplisit di UTC sehingga tidak
+    bergantung pada zona waktu mesin yang menjalankan bot.
+
+    DIPERBAIKI (offset_server.py): pengukuran mentah dari tick BASI - jeda
+    harian 04:00-05:00 WIB dan akhir pekan - melenceng -1 jam sampai -49
+    jam. Mode default sekarang lewat PelacakOffset: nilai baru dipakai hanya
+    bila konsisten 30 menit. strict=True mengembalikan pengukuran mentah dan
+    MENOLAK tick basi - dipakai downloader, yang memang harus mengukur.
     """
-    info = mt5.symbol_info_tick(load_config()["symbol"]["name"])
+    global _PELACAK_OFFSET
+    cfg = load_config()
+    info = mt5.symbol_info_tick(cfg["symbol"]["name"])
     if info is None or info.time == 0:
         # JANGAN jatuh ke angka config secara diam-diam. Nilai statis di
         # config pernah salah 7 jam dan menggeser seluruh dataset; kalau
@@ -154,12 +164,26 @@ def detect_server_offset_hours() -> int:
             "Pastikan MT5 terhubung dan simbol aktif di Market Watch."
         )
 
-    # MT5 mengembalikan jam dinding server sebagai epoch. Membacanya
-    # sebagai UTC memberi jam dinding server apa adanya, lalu selisihnya
-    # terhadap UTC sekarang adalah offset server.
-    server_wall = datetime.fromtimestamp(info.time, tz=timezone.utc)
     now_utc = datetime.now(timezone.utc)
-    return round((server_wall - now_utc).total_seconds() / 3600)
+    if strict:
+        bulat, segar = ukur(info.time, now_utc)
+        if not segar:
+            raise ConnectionError(
+                "Tick terakhir basi (pasar tutup atau jeda harian) - offset "
+                "server tidak bisa diukur akurat sekarang. Ulangi saat pasar aktif."
+            )
+        return bulat
+
+    if _PELACAK_OFFSET is None:
+        _PELACAK_OFFSET = PelacakOffset(
+            offset_config=(cfg.get("broker") or {}).get("server_utc_offset")
+        )
+    return _PELACAK_OFFSET.perbarui(info.time, now_utc)
+
+
+def ambil_pesan_offset() -> list[str]:
+    """Pesan perubahan/perbedaan offset yang belum dilog (dikosongkan setelah dibaca)."""
+    return _PELACAK_OFFSET.ambil_pesan() if _PELACAK_OFFSET is not None else []
 
 
 def bars_to_utc_frame(bars, offset_hours: int) -> "pd.DataFrame":
