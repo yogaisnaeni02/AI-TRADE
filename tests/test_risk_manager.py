@@ -14,6 +14,7 @@ Setiap tes memakai file sementara, tidak pernah menyentuh logs/ sungguhan.
 
 from __future__ import annotations
 
+import copy
 import csv
 import sys
 import tempfile
@@ -22,7 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.risk.manager import RiskManager  # noqa: E402
+from src.risk.manager import RiskManager, load_risk_config  # noqa: E402
 
 # Kamis, 10 September 2026. Senin minggu itu = 7 September.
 NOW = datetime(2026, 9, 10, 12, 0, 0)
@@ -245,6 +246,103 @@ def test_documents_lot_floor_exceeding_configured_risk(tmp: Path) -> None:
     assert d.allowed, d.reason
     assert d.risk_pct > rm.max_risk_pct, (d.risk_pct, rm.max_risk_pct)
     assert d.risk_pct <= rm.max_lot_pct, (d.risk_pct, rm.max_lot_pct)
+
+
+# -- rem per varian dan sumber riwayat MT5 -------------------------------
+
+
+def write_journal_varian(path: Path, rows: list[tuple[str, str, float, int]]) -> None:
+    """rows = [(entry_time_iso, exit_time_iso, net_idr, magic), ...]"""
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=["ticket", "entry_time", "exit_time",
+                                          "net_idr", "magic", "varian"])
+        w.writeheader()
+        for i, (t_in, t_out, net, magic) in enumerate(rows, start=1):
+            w.writerow({"ticket": i, "entry_time": t_in, "exit_time": t_out,
+                        "net_idr": net, "magic": magic, "varian": ""})
+
+
+def test_rem_per_varian_tidak_tercampur(tmp: Path) -> None:
+    """Regresi: SL varian lain di akun yang sama dulu ikut dihitung sebagai
+    loss beruntun varian ini - pyramid5 bisa menghentikan baseline."""
+    batas = make_manager(tmp, []).max_consec_losses
+    journal = tmp / "trades.csv"
+    write_journal_varian(journal, [
+        ("2026-09-10T08:00:00", "2026-09-10T08:30:00", +10_000, 20260909),
+    ] + [
+        (f"2026-09-10T09:{i:02d}:00", f"2026-09-10T09:{i + 1:02d}:30", -30_000, 20260914)
+        for i in range(batas)
+    ])
+
+    baseline = RiskManager(journal_path=journal, state_path=tmp / "a.json", magic=20260909)
+    d = baseline.check(now=NOW, **BASE)
+    assert d.allowed, d.reason
+    assert baseline.state.day_trades == 1, baseline.state.day_trades
+
+    pyramid = RiskManager(journal_path=journal, state_path=tmp / "b.json", magic=20260914)
+    pyramid.refresh_from_journal(NOW)
+    assert pyramid.state.consecutive_losses == batas, pyramid.state.consecutive_losses
+
+    semua = RiskManager(journal_path=journal, state_path=tmp / "c.json")
+    semua.refresh_from_journal(NOW)
+    assert semua.state.day_trades == batas + 1, semua.state.day_trades
+
+
+def test_baris_tanpa_magic_milik_baseline(tmp: Path) -> None:
+    journal = tmp / "trades.csv"
+    write_journal(journal, [("2026-09-10T09:00:00", -30_000)])   # skema lama
+    baseline = RiskManager(journal_path=journal, state_path=tmp / "a.json", magic=20260909)
+    baseline.refresh_from_journal(NOW)
+    assert baseline.state.day_trades == 1, baseline.state.day_trades
+    lain = RiskManager(journal_path=journal, state_path=tmp / "b.json", magic=20260911)
+    lain.refresh_from_journal(NOW)
+    assert lain.state.day_trades == 0, lain.state.day_trades
+
+
+def test_refresh_dari_riwayat_tanpa_csv(tmp: Path) -> None:
+    """Bot mengoper baris riwayat MT5 langsung; CSV tidak diperlukan."""
+    rm = RiskManager(journal_path=tmp / "tidak_ada.csv", state_path=tmp / "s.json", magic=20260909)
+    trades = [
+        {"entry_time": f"2026-09-10T09:0{i}:00", "exit_time": f"2026-09-10T09:1{i}:00",
+         "net_idr": -30_000, "magic": 20260909}
+        for i in range(2)
+    ]
+    assert rm.refresh_from_journal(NOW, trades=trades)
+    assert rm.state.consecutive_losses == 2, rm.state.consecutive_losses
+
+    # Pergantian hari memakai sumber terakhir itu, bukan CSV yang tidak ada.
+    rm.state.day = None
+    rm.check(now=NOW, **BASE)
+    assert rm.state.consecutive_losses == 2, rm.state.consecutive_losses
+
+
+def test_journal_gagal_dibaca_rem_tidak_direset(tmp: Path) -> None:
+    """Regresi: gagal baca dulu = [] = semua counter nol = rem terbuka."""
+    rm = make_manager(tmp, [("2026-09-10T09:00:00", -30_000), ("2026-09-10T10:00:00", -30_000)])
+    assert rm.refresh_from_journal(NOW)
+    assert rm.state.consecutive_losses == 2
+
+    rm.journal_path = tmp   # ada, tetapi direktori -> open() gagal
+    assert rm.refresh_from_journal(NOW) is False
+    assert rm.state.consecutive_losses == 2, rm.state.consecutive_losses
+    assert rm.journal_error
+
+
+def test_mode_batch_per_varian(tmp: Path) -> None:
+    risk = copy.deepcopy(load_risk_config())
+    risk["daily"]["loss_mode"] = "batch"
+    rm = RiskManager(risk=risk, journal_path=tmp / "x.csv", state_path=tmp / "s.json", magic=20260914)
+    trades = [
+        # batch 1: dua posisi bertumpuk, keduanya rugi
+        {"entry_time": "2026-09-10T09:00:00", "exit_time": "2026-09-10T09:20:00", "net_idr": -1, "magic": 20260914},
+        {"entry_time": "2026-09-10T09:05:00", "exit_time": "2026-09-10T09:25:00", "net_idr": -1, "magic": 20260914},
+        # trade varian lain di sela-sela: tidak boleh memutus rentetan
+        {"entry_time": "2026-09-10T09:30:00", "exit_time": "2026-09-10T09:35:00", "net_idr": +5, "magic": 20260909},
+        # batch 2: satu posisi rugi
+        {"entry_time": "2026-09-10T10:00:00", "exit_time": "2026-09-10T10:10:00", "net_idr": -1, "magic": 20260914},
+    ]
+    rm.refresh_from_journal(NOW, trades=trades)
+    assert rm.state.consecutive_loss_batches == 2, rm.state.consecutive_loss_batches
 
 
 # -- runner --------------------------------------------------------------

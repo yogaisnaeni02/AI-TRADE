@@ -17,6 +17,8 @@ from typing import Optional, Sequence
 
 import yaml
 
+from ..variants import BASELINE_MAGIC
+
 ROOT = Path(__file__).resolve().parents[2]
 RISK_PATH = ROOT / "config" / "risk_limits.yaml"
 SETTINGS_PATH = ROOT / "config" / "settings.yaml"
@@ -70,9 +72,22 @@ class RiskManager:
         risk: Optional[dict] = None,
         journal_path: Optional[Path] = None,
         state_path: Optional[Path] = None,
+        magic: Optional[int] = None,
     ):
         self.cfg = config or load_settings()
         self.risk = risk or load_risk_config()
+
+        # Magic varian pemilik rem ini. None = hitung SEMUA baris journal
+        # (perilaku lama; dipakai skrip analisis dan tes).
+        #
+        # DIPERBAIKI: journal mencatat trade dari SEMUA magic yang terdaftar
+        # di variants.yaml, tetapi rem harian, loss beruntun, dan mingguan
+        # menghitung semuanya bersama. Dua varian di akun yang sama saling
+        # menghentikan - 3 SL pyramid5 membuat baseline "stop sisa hari".
+        # Bot sekarang mengoper magic variannya.
+        self.magic = int(magic) if magic is not None else None
+        self.journal_error = ""
+        self._trades_terakhir: Optional[list] = None
 
         # Jalur bisa di-override agar dapat diuji tanpa menyentuh logs/
         # yang sesungguhnya.
@@ -128,62 +143,58 @@ class RiskManager:
     def _week_start(d: date) -> date:
         return date.fromordinal(d.toordinal() - d.weekday())
 
-    def _read_journal(self) -> list[tuple[datetime, float]]:
-        """Pasangan (waktu exit, net_idr) dari journal, terurut waktu."""
-        if not self.journal_path.exists():
-            return []
+    def _baris_csv(self) -> Optional[list[dict]]:
+        """Baris mentah journal.
 
-        rows: list[tuple[datetime, float]] = []
-        try:
-            with open(self.journal_path, encoding="utf-8", newline="") as f:
-                for row in csv.DictReader(f):
-                    raw_time, raw_net = row.get("exit_time"), row.get("net_idr")
-                    if not raw_time or raw_net in (None, ""):
-                        continue
-                    try:
-                        rows.append((datetime.fromisoformat(raw_time), float(raw_net)))
-                    except ValueError:
-                        # Baris rusak atau header yang terduplikasi — lewati,
-                        # jangan sampai menjatuhkan seluruh rekonsiliasi.
-                        continue
-        except OSError:
-            return []
-
-        rows.sort(key=lambda r: r[0])
-        return rows
-
-    def _read_journal_full(self) -> list[tuple[datetime, datetime, float, str]]:
-        """(entry_time, exit_time, net_idr, varian) dari journal.
-
-        Dibutuhkan mode BATCH: pengelompokan batch memerlukan entry_time,
-        bukan hanya exit_time. Dipisah dari `_read_journal()` supaya jalur
-        lama tidak ikut berubah perilakunya.
+        [] bila file belum ada (memang belum ada trade), tetapi None bila
+        file ADA dan gagal dibaca. Keduanya harus dibedakan: dulu kegagalan
+        baca juga menghasilkan [] sehingga semua counter rem direset ke nol -
+        rem terbuka lebar justru saat datanya tidak terbaca.
         """
         if not self.journal_path.exists():
             return []
-
-        rows: list[tuple[datetime, datetime, float, str]] = []
         try:
             with open(self.journal_path, encoding="utf-8", newline="") as f:
-                for row in csv.DictReader(f):
-                    t_in, t_out = row.get("entry_time"), row.get("exit_time")
-                    raw_net = row.get("net_idr")
-                    if not t_in or not t_out or raw_net in (None, ""):
-                        continue
-                    try:
-                        rows.append((
-                            datetime.fromisoformat(t_in),
-                            datetime.fromisoformat(t_out),
-                            float(raw_net),
-                            row.get("varian") or "",
-                        ))
-                    except ValueError:
-                        continue
-        except OSError:
-            return []
+                return list(csv.DictReader(f))
+        except OSError as e:
+            self.journal_error = f"{type(e).__name__}: {e}"
+            return None
 
-        rows.sort(key=lambda r: r[0])
-        return rows
+    @staticmethod
+    def _waktu(v) -> Optional[datetime]:
+        if isinstance(v, datetime):
+            return v
+        if not v:
+            return None
+        try:
+            return datetime.fromisoformat(str(v))
+        except ValueError:
+            return None
+
+    def _urai_trade(self, baris: Sequence[dict]) -> list[tuple[Optional[datetime], datetime, float, int]]:
+        """(entry_time, exit_time, net_idr, magic) milik varian ini, urut exit_time.
+
+        Baris rusak atau header terduplikasi dilewati, jangan sampai
+        menjatuhkan seluruh rekonsiliasi. Baris tanpa kolom magic (journal
+        sebelum sistem varian) dianggap milik baseline, sama dengan migrasi
+        skema di journal.py.
+        """
+        out: list[tuple[Optional[datetime], datetime, float, int]] = []
+        for row in baris:
+            t_out = self._waktu(row.get("exit_time"))
+            raw_net = row.get("net_idr")
+            if t_out is None or raw_net in (None, ""):
+                continue
+            try:
+                net = float(raw_net)
+                magic = int(row.get("magic") or BASELINE_MAGIC)
+            except (TypeError, ValueError):
+                continue
+            if self.magic is not None and magic != self.magic:
+                continue
+            out.append((self._waktu(row.get("entry_time")), t_out, net, magic))
+        out.sort(key=lambda r: r[1])
+        return out
 
     @staticmethod
     def _kelompokkan_batch(
@@ -220,7 +231,7 @@ class RiskManager:
             batches.append(current)
         return batches
 
-    def refresh_from_journal(self, now: datetime) -> None:
+    def refresh_from_journal(self, now: datetime, trades: Optional[Sequence[dict]] = None) -> bool:
         """
         Bangun ulang counter harian dan mingguan dari riwayat trade.
 
@@ -236,12 +247,27 @@ class RiskManager:
 
         Merekonsiliasi dari journal menyelesaikan keduanya sekaligus, dan
         bersifat idempoten: aman dipanggil berkali-kali per siklus.
+
+        `trades`: baris trade tertutup langsung (kolom sama dengan
+        logs/trades.csv). Bot mengopernya dari riwayat MT5 tiap siklus agar
+        rem TIDAK bergantung pada CSV, yang bisa gagal ditulis tanpa ketahuan
+        (mis. file sedang dibuka Excel). None = baca dari journal_path.
+
+        Mengembalikan False bila sumber gagal dibaca; counter lama
+        DIPERTAHANKAN, bukan direset ke nol.
         """
+        baris = list(trades) if trades is not None else self._baris_csv()
+        if baris is None:
+            return False
+        if trades is not None:
+            self._trades_terakhir = baris
+        self.journal_error = ""
+
         today = now.date()
         monday = self._week_start(today)
-        rows = self._read_journal()
+        rows = self._urai_trade(baris)
 
-        day_nets = [net for t, net in rows if t.date() == today]
+        day_nets = [net for _, t, net, _ in rows if t.date() == today]
         self.state.day_pnl = sum(day_nets)
         self.state.day_trades = len(day_nets)
 
@@ -260,7 +286,10 @@ class RiskManager:
         # sama seperti counter lain: state di memori hilang saat restart,
         # justru di momen orang paling mungkin me-restart bot.
         if self.loss_mode == "batch":
-            full = [r for r in self._read_journal_full() if r[1].date() == today]
+            full = sorted(
+                (r for r in rows if r[0] is not None and r[1].date() == today),
+                key=lambda r: r[0],
+            )
             batch_streak = 0
             for batch in reversed(self._kelompokkan_batch(full)):
                 # Batch rugi HANYA bila seluruh posisinya rugi.
@@ -273,8 +302,9 @@ class RiskManager:
             self.state.consecutive_loss_batches = 0
 
         self.state.week_pnl = sum(
-            net for t, net in rows if self._week_start(t.date()) == monday
+            net for _, t, net, _ in rows if self._week_start(t.date()) == monday
         )
+        return True
 
     def load_state(self) -> None:
         """
@@ -334,7 +364,9 @@ class RiskManager:
         if self.state.day != today or self.state.week_start != monday:
             self.state.day = today
             self.state.week_start = monday
-            self.refresh_from_journal(now)
+            # Pakai sumber terakhir yang dioper bot (riwayat MT5) bila ada,
+            # supaya pergantian hari tidak diam-diam kembali ke CSV.
+            self.refresh_from_journal(now, trades=self._trades_terakhir)
 
         self.state.peak_equity = max(self.state.peak_equity, equity)
 
