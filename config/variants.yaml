@@ -417,9 +417,20 @@ varian:
         # semua", sehingga rem 3 batch rugi tidak pernah menyala dan entry
         # membengkak. Di bar tutup rem batch kembali bekerja.
         #
-        # Revisi SL/TP 16 Sep (61c19ef) diukur dengan bar berjalan. Setelah
-        # digabung dengan bar tutup, kombinasinya diukur ulang di docs/70
-        # bagian 11.
+        # DIUKUR ULANG setelah revisi SL/TP 16 Sep (61c19ef), modal Rp 3 jt,
+        # halt DD mati (docs/70 bagian 11). Angka revisi di commit itu
+        # (+17,79R) SUDAH memakai bar tutup - direproduksi persis.
+        #
+        #                     bar berjalan              bar tutup (dipakai)
+        #   100 hari Exness   +30,15R  maxDD 41,6%      +17,79R  maxDD 55,7%
+        #   30 hari           -12,13R  modal habis      -10,02R  modal habis
+        #                              sejak 21 Agu              sejak 15 Sep
+        #
+        # TIDAK KONSISTEN: di SL/TP lama bar tutup menang di kedua periode;
+        # di SL/TP baru periode panjang memilih bar berjalan (+12R), periode
+        # pendek memilih bar tutup (+2R, tercemar efek jalur - versi bar
+        # berjalan kehabisan modal 25 hari lebih awal). Dibiarkan "tutup"
+        # karena tidak ada dasar kuat untuk membalik. KEPUTUSAN TERBUKA.
         autoclose_bar: tutup
         # 48 -> 96 bar, sama dengan pyramid5. Dari log NYATA: trade yang
         # MENANG butuh median 92,8 menit, yang kalah hanya 29,1 menit.

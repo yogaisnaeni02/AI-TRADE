@@ -483,3 +483,86 @@ seragam di dua periode dan empat varian, dan cocok dengan kejadian live.
 4. Arah yang layak diuji berikutnya untuk "hari panas" adalah kebalikan
    dari membuka batas: filter overextension (rekomendasi 4 dokumen
    AnalisaLog) - menahan entry saat gerakan sudah terlalu jauh.
+
+---
+
+## 11. Setelah merge revisi SL/TP varian agresif (61c19ef)
+
+Rekan kerja merombak SL/TP `pyramid5` dan `autoclose_agresif` (SL
+3000-6000, RR 3,0, TP min 9000, timeout 96 bar, konfluensi ADX 35) dan
+menurunkan `min_equity_idr` 4 jt -> 2 jt untuk SEMUA varian. Diukurnya
+dengan `simulasi_live.py` dari branch ini, 100 hari Exness, modal Rp 3 jt.
+
+### Reproduksi
+
+Setelan sama (1 Jun - 9 Sep 2026, modal Rp 3 jt, halt DD mati):
+
+```
+varian              angka rekan kerja            hasil di sini (config merge)
+konfluensi          +36,61R  maxDD 28,3%          +36,61R  maxDD 28,3%   identik
+autoclose_agresif   +17,79R  452 entry  55,7%     +17,79R  452 entry  55,7%   identik
+pyramid5            -17,27R   62 entry  79,0%     -10,27R   55 entry  69,7%   BEDA
+```
+
+Dua dari tiga identik, jadi data dan kodenya sama. **Angka +17,79R itu
+ternyata sudah memakai `autoclose_bar: tutup`** - catatan di commit merge
+`fe3cf54` yang menyebut "diukur dengan bar berjalan" SALAH, dikoreksi di
+sini dan di `variants.yaml`.
+
+`pyramid5` tidak bisa direproduksi. Bukan karena titik mulai (`--hari
+100` memberi hasil identik) dan bukan karena auto-close (varian ini tidak
+memakainya). Kemungkinan setelan run di sisi rekan kerja berbeda untuk
+varian itu saja; tidak bisa dipastikan dari sini. Kesimpulannya tidak
+berubah: kedua angka sangat negatif, modal habis di pertengahan Juni.
+
+### Bar berjalan vs bar tutup, di SL/TP baru
+
+```
+autoclose_agresif     bar berjalan                  bar tutup (dipakai)
+100 hari Exness       +30,15R  456 e.  maxDD 41,6%   +17,79R  452 e.  maxDD 55,7%
+30 hari               -12,13R   94 e.  maxDD 58,5%   -10,02R   93 e.  maxDD 56,0%
+                      modal habis sejak 21 Agu       modal habis sejak 15 Sep
+```
+
+Di SL/TP lama (bagian 4) bar tutup menang di kedua periode. Di SL/TP baru
+hasilnya **tidak konsisten**: periode panjang memilih bar berjalan (+12,4R,
+drawdown juga lebih kecil), periode pendek memilih bar tutup (+2,1R) -
+tetapi perbandingan 30 hari itu tercemar efek jalur, karena versi bar
+berjalan kehabisan modal 25 hari lebih awal.
+
+Dibiarkan `tutup` (setelan yang diukur dan dilaporkan rekan kerja) karena
+tidak ada dasar kuat untuk membalik. **Keputusan terbuka.** Yang tidak
+berubah di kedua mode: di modal Rp 3 jt varian ini kehabisan modal dalam
+30 hari terakhir, dan drawdown 41-58%.
+
+### Temuan: rem persentase jauh lebih ketat di modal kecil
+
+`konfluensi`, 30 hari, config tidak berubah:
+
+```
+modal       entry  WR    totR     penolakan terbanyak
+Rp 5,5 jt     51   33%  +9,94R   41x sudah 2 posisi; 11x batas trade/hari
+Rp 3 jt       24   17%  -9,89R   44x batas RUGI HARIAN; 34x batas RUGI MINGGUAN
+```
+
+Penyebabnya aritmetika, bukan strategi. Lot terkunci 0,01, jadi satu SL
+(4500 poin) selalu Rp 78.676:
+
+```
+modal       1 SL     rem harian 4%        rem mingguan 8%
+Rp 5,5 jt   1,43%    setelah ~3 SL        setelah ~6 SL
+Rp 3 jt     2,62%    berhenti di SL ke-2  berhenti di SL ke-4
+Rp 2 jt     3,93%    berhenti di SL ke-2  berhenti di SL ke-3
+```
+
+Di modal Rp 2-3 jt, rem rugi harian 4% praktis berarti **"berhenti setelah
+2 SL dalam sehari"** - lebih ketat dari rem "3 loss beruntun" yang sengaja
+dipilih. Untuk varian agresif dengan SL sampai 6000 poin, satu SL sudah
+Rp 104.902 (3,5% dari Rp 3 jt).
+
+Dampaknya ke hasil TIDAK selalu negatif - di 100 hari `konfluensi` modal
+Rp 3 jt justru +36,61R (vs +32,61R di Rp 5,5 jt). Yang pasti hanya
+mekanismenya. **Keputusan terbuka untuk pemilik** yang berencana mulai
+dari modal kecil: apakah rem harian/mingguan sebaiknya dinyatakan dalam
+jumlah SL (tetap berapa pun modalnya), bukan persen. Belum diubah -
+`daily`/`weekly` di `risk_limits.yaml` terkunci docs/45 bagian 7.
