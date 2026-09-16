@@ -48,6 +48,21 @@ def read_log(lines: int = 60) -> list[str]:
 
 
 def read_trades() -> pd.DataFrame:
+    """Trade dari SELURUH PC, bukan hanya PC yang membuka dashboard.
+
+    Tiap PC menulis journal-nya sendiri (trades__<pc>.csv) supaya tidak
+    bentrok saat di-push. Dashboard menggabungkannya kembali di sini,
+    sehingga hasil dari beberapa PC terlihat dalam satu tabel.
+    """
+    try:
+        from .journal_gabung import baca_semua
+        rows = baca_semua()
+        if rows:
+            return pd.DataFrame(rows)
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Cadangan: file tunggal lama, kalau modul gabungan bermasalah.
     if not TRADES_DB.exists():
         return pd.DataFrame()
     try:

@@ -26,6 +26,14 @@ Thumbs.db
 logs/risk_state.json
 logs/*.tmp
 
+# Snapshot kondisi bot - DITULIS ULANG TIAP SIKLUS (3 detik).
+#
+# Dulu ikut Git dan itu salah: file yang berubah tiap detik membuat
+# `git pull` GAGAL dengan "local changes would be overwritten" setiap kali
+# bot sedang berjalan. Isinya pun tidak berguna bagi PC lain - hanya
+# kondisi sesaat mesin yang menulisnya.
+logs/snapshot.json
+
 # Nama PC untuk label notifikasi Telegram - setelan PER-PC, bukan proyek.
 # Kalau ikut di-commit, nama PC satu orang akan menimpa milik yang lain
 # setiap kali pull, dan label di Telegram jadi salah.
@@ -39,3 +47,9 @@ data/processed/XAUUSDm_M15_features.parquet
 
 # artefak sementara CatBoost (dibuat scripts/ml_banding_algoritma.py)
 catboost_info/
+
+# Hasil GABUNGAN journal semua PC - file TURUNAN, dibangun ulang kapan
+# saja dari logs/trades__<pc>.csv. Yang di-commit adalah file per-PC,
+# bukan gabungannya; kalau gabungan ikut Git ia akan bentrok setiap kali
+# dua PC menambah trade, persis masalah yang mau dihindari.
+logs/trades_gabungan.csv

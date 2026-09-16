@@ -305,9 +305,17 @@ class RuleEngine:
             return False, "ATR tidak tersedia"
         if pd.isna(row.atr_percentile):
             return False, "persentil ATR belum tersedia"
-        if row.atr_percentile < 0.20:
+        # Ambang dari config, BUKAN angka tetap.
+        #
+        # BUG YANG DIPERBAIKI (15 Sep 2026): dulu 0,20/0,95 di-hardcode di
+        # sini. Karena gerbang ini berjalan SEBELUM detektor setup, ia
+        # menolak duluan - sehingga mengubah momentum_fib.atr_percentile_min
+        # / _max di config TIDAK BERPENGARUH SAMA SEKALI. Terukur:
+        # melonggarkan ke 0,05-0,99 tetap menghasilkan 11.925 sinyal, sama
+        # persis dengan default. Setelan itu diam-diam tidak berfungsi.
+        if row.atr_percentile < self.atr_lo:
             return False, "volatilitas terlalu rendah - spread mendominasi"
-        if row.atr_percentile > 0.95:
+        if row.atr_percentile > self.atr_hi:
             return False, "volatilitas ekstrem - kemungkinan berita"
         if row.spread > self.cfg["costs"]["spread_max_accept"]:
             return False, f"spread {row.spread} terlalu lebar"

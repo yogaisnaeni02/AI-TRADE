@@ -23,7 +23,19 @@ ROOT = Path(__file__).resolve().parents[2]
 RISK_PATH = ROOT / "config" / "risk_limits.yaml"
 SETTINGS_PATH = ROOT / "config" / "settings.yaml"
 LOG_DIR = ROOT / "logs"
-TRADES_CSV = LOG_DIR / "trades.csv"
+
+# Rem risiko membaca journal PC INI SAJA, bukan gabungan semua PC.
+#
+# Sengaja: tiap PC menjalankan varian berbeda di AKUN berbeda. Batas
+# harian, loss beruntun, dan rugi mingguan adalah batas untuk akun yang
+# sedang ditradingkan - kalau digabung, kerugian di akun PC lain akan
+# menghentikan bot di sini padahal akunnya baik-baik saja.
+#
+# Penggabungan hanya untuk PELAPORAN (dashboard, evaluasi), bukan untuk
+# pengambilan keputusan. Lihat src/monitoring/journal_gabung.py.
+from ..monitoring.journal_gabung import path_pc as _path_pc
+
+TRADES_CSV = _path_pc()
 STATE_PATH = LOG_DIR / "risk_state.json"
 
 

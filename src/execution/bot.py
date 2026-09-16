@@ -387,9 +387,15 @@ class TradingBot:
         # Arah dulu, lalu fib dan momentum dengan tanda dan ambang yang SAMA
         # dengan RuleEngine._momentum_fib.
         #
-        # DIPERBAIKI: dulu fib 0,75/0,25 dan momentum sisi buy ditulis mati
-        # di sini, sehingga varian fib 0,70/0,30 dan kondisi sell dilaporkan
-        # salah - jenis kebohongan yang sama dengan bug ATR di atas.
+        # Ambang dibaca dari RuleEngine, bukan ditulis ulang di sini. Dulu
+        # 0,75/0,25 di-hardcode, sehingga varian yang memakai ambang lain
+        # (autoclose_agresif & pyramid5 memakai 0,70/0,30) melaporkan angka
+        # yang SALAH - terlihat seperti sinyal ditolak oleh ambang yang
+        # sebenarnya tidak berlaku (756b13c).
+        #
+        # Momentum juga dulu hanya diuji untuk sisi buy dan dibandingkan
+        # dengan ambang PENUH, padahal gerbangnya menerima tier reduced di
+        # atas 50% ambang - kondisi sell tidak pernah terlaporkan benar.
         tren = row.get("trend_htf")
         if tren not in ("uptrend", "downtrend"):
             kurang.append(f"HTF {tren}")
