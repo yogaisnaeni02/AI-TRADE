@@ -22,16 +22,42 @@ simulated_equity_idr: 4000000
 #
 #     SL maksimum 4500 points x Rp 1.748,36/point x 0,01 lot = Rp 78.676
 #
-# Terhadap modal, itu berarti:
-#     Rp 4.000.000  -> 1,97%  <- ambang dipakai (batas atas "agresif wajar")
+# Terhadap modal, itu berarti (SL 4500 - varian non-agresif):
 #     Rp 5.827.867  -> 1,35%  <- target risiko config tercapai presisi
-#     Rp 3.000.000  -> 2,62%  (agresif, tidak disarankan)
-#     Rp 2.000.000  -> 3,93%  (7 loss beruntun = -28% modal)
+#     Rp 4.000.000  -> 1,97%  (batas atas "agresif wajar")
+#     Rp 3.000.000  -> 2,62%  (agresif)
+#     Rp 2.000.000  -> 3,93%  <- ambang dipakai sekarang
 #
-# Ambang 4 juta dipilih, bukan 5,8 juta, supaya bot tetap bisa jalan di
-# modal yang wajar - dengan konsekuensi risiko efektif ~1,97% bukan 1,35%.
-# Untuk risiko sesuai target, modalnya Rp 5,8 juta.
-min_equity_idr: 4000000
+# DITURUNKAN 4.000.000 -> 2.000.000 (16 Sep 2026) atas permintaan pemilik:
+# "aku pasti akan mulai dari modal kecil kyk 2-3 jt aja di akun real jadi
+# untuk akun demo akan segitu juga ... tujuanku itu sistemnya emng bener2
+# fit gitu bukan berapa rupiah yg didapet".
+#
+# Tanpa perubahan ini bot MENOLAK SETIAP SINYAL di modal Rp 2-3 juta
+# dengan pesan "equity di bawah minimum" - jadi sistemnya tidak akan
+# pernah sempat diuji sama sekali.
+#
+# YANG HARUS DISADARI, dan angkanya bukan tebakan:
+#
+#   Varian agresif (pyramid5, autoclose_agresif) memakai SL maks 6000
+#   points sejak revisi 16 Sep, bukan 4500. Rugi per trade jadi:
+#     6000 pts x Rp 1.748,36 x 0,01 lot = Rp 104.902
+#
+#   modal Rp 2 jt -> 5,25% per trade | 7 loss beruntun = -37% modal
+#   modal Rp 3 jt -> 3,50% per trade | 7 loss beruntun = -24% modal
+#
+#   Varian agresif membuka sampai 10 posisi bersamaan. SATU batch penuh
+#   kena SL = Rp 1.049.020 = 52% dari modal Rp 2 juta, dalam satu tarikan.
+#
+#   Terukur di simulasi_live.py, 100 hari, modal Rp 3 jt:
+#     pyramid5           -17,27R   maxDD 79,0%
+#     autoclose_agresif  +17,79R   maxDD 55,7%
+#     konfluensi         +36,61R   maxDD 28,3%   <- satu-satunya yang wajar
+#
+# Jadi ambang ini dibuka untuk MENGUJI, bukan karena modal segitu aman
+# untuk varian agresif. Untuk modal Rp 2-3 juta, varian yang masuk akal
+# dijalankan adalah konfluensi (max 2 posisi), bukan yang 10 posisi.
+min_equity_idr: 2000000
 
 # Tiered sizing: dua tingkat sinyal, keduanya terbukti untung, risiko
 # beda sesuai jarak ke breakeven.
