@@ -48,27 +48,31 @@ echo.
 echo --------------------------------------------
 echo   VARIAN YANG TERSEDIA
 echo --------------------------------------------
-python run_bot.py --daftar-varian
+python -m src.variants
 echo.
-echo Ketik nama varian, atau kosongkan lalu Enter untuk memakai
-echo config apa adanya (settings.yaml).
+echo Ketik NOMOR varian dari kolom "no" (nama lengkap juga boleh),
+echo atau kosongkan lalu Enter untuk memakai config apa adanya (settings.yaml).
 echo.
-set /p VARIAN="Varian: "
+rem Dikosongkan dulu: set /p yang dijawab Enter kosong MEMPERTAHANKAN nilai
+rem lama, sehingga pilihan salah sebelumnya akan terpakai lagi.
+set PILIH=
+set VARIAN=
+set /p PILIH="Nomor varian: "
 
-rem Validasi nama varian SEBELUM bot dijalankan.
+rem Terjemahkan nomor -> nama varian SEBELUM bot dijalankan.
 rem
-rem Tanpa ini, salah ketik satu huruf (mis. "auto_close" vs "autoclose")
-rem baru ketahuan setelah menunggu 5 detik, lalu gagal dengan traceback
-rem Python yang terlihat menakutkan - padahal cuma typo.
-if "%VARIAN%"=="" goto varian_ok
-python -c "import sys; sys.path.insert(0,'.'); from src.variants import list_variants; sys.exit(0 if '%VARIAN%' in list_variants() else 1)"
-if errorlevel 1 (
+rem Tanpa ini, salah ketik baru ketahuan setelah menunggu 5 detik, lalu
+rem gagal dengan traceback Python yang terlihat menakutkan - padahal cuma
+rem typo. Mengetik nomor menghilangkan typo nama sama sekali.
+if "%PILIH%"=="" goto varian_ok
+for /f "delims=" %%V in ('python -m src.variants --pilih "%PILIH%"') do set VARIAN=%%V
+if "%VARIAN%"=="" (
     echo.
-    echo !! Varian "%VARIAN%" tidak dikenal - periksa ejaannya.
-    echo    Perhatikan: nama varian TIDAK memakai garis bawah.
+    echo !! Pilihan "%PILIH%" tidak ada di daftar - ketik nomornya, mis. 4
     echo.
     goto pilih_varian
 )
+echo Varian terpilih: %VARIAN%
 
 :varian_ok
 set ARG=

@@ -112,30 +112,62 @@ def resolve(name: Optional[str], base_config: Optional[dict] = None) -> tuple[di
 
 
 def format_table() -> str:
-    """Tabel ringkas semua varian, untuk ditampilkan di CLI."""
+    """Tabel ringkas semua varian bernomor, untuk ditampilkan di CLI.
+
+    Nomornya urutan di config/variants.yaml - nomor yang sama diterima
+    `pilih()`, jadi orang cukup mengetik "3" alih-alih nama lengkap.
+    """
     variants = list_variants()
     if not variants:
         return "(tidak ada varian terdaftar di config/variants.yaml)"
 
     rows = []
-    for name, meta in variants.items():
+    for no, (name, meta) in enumerate(variants.items(), start=1):
         rows.append((
+            str(no),
             name,
             str(meta.get("magic", "-")),
-            meta.get("status", "-"),
+            str(meta.get("status", "-")),
             (meta.get("deskripsi") or "").strip().split("\n")[0][:60],
         ))
 
-    w0 = max(len(r[0]) for r in rows) + 2
-    w1 = max(len(r[1]) for r in rows) + 2
-    w2 = max(len(r[2]) for r in rows) + 2
+    wn = max(len(r[0]) for r in rows) + 2
+    w0 = max(len(r[1]) for r in rows) + 2
+    w1 = max(len(r[2]) for r in rows) + 2
+    w2 = max(len(r[3]) for r in rows) + 2
 
-    lines = [f"{'varian':<{w0}}{'magic':<{w1}}{'status':<{w2}}deskripsi"]
-    lines.append("-" * (w0 + w1 + w2 + 40))
-    for name, magic, status, desc in rows:
-        lines.append(f"{name:<{w0}}{magic:<{w1}}{status:<{w2}}{desc}")
+    lines = [f"{'no':<{wn}}{'varian':<{w0}}{'magic':<{w1}}{'status':<{w2}}deskripsi"]
+    lines.append("-" * (wn + w0 + w1 + w2 + 40))
+    for no, name, magic, status, desc in rows:
+        lines.append(f"{no:<{wn}}{name:<{w0}}{magic:<{w1}}{status:<{w2}}{desc}")
     return "\n".join(lines)
 
 
+def pilih(pilihan: str) -> Optional[str]:
+    """Nomor dari format_table() atau nama varian -> nama varian, None bila tidak dikenal.
+
+    Nama tetap diterima (tanpa beda huruf besar/kecil) supaya kebiasaan
+    lama dan skrip yang sudah memakai nama tidak rusak.
+    """
+    teks = (pilihan or "").strip()
+    nama = list(list_variants())
+    if teks.isdigit():
+        i = int(teks)
+        return nama[i - 1] if 1 <= i <= len(nama) else None
+    cocok = [n for n in nama if n.lower() == teks.lower()]
+    return cocok[0] if cocok else None
+
+
 if __name__ == "__main__":
-    print(format_table())
+    # Dipakai 5-JALANKAN-VARIAN.bat - tanpa mengimpor MetaTrader5, jadi cepat.
+    #   python -m src.variants              tabel bernomor
+    #   python -m src.variants --pilih 3    cetak nama varian; kode 1 bila tidak dikenal
+    import sys
+
+    if len(sys.argv) == 3 and sys.argv[1] == "--pilih":
+        hasil = pilih(sys.argv[2])
+        if hasil is None:
+            sys.exit(1)
+        print(hasil)
+    else:
+        print(format_table())

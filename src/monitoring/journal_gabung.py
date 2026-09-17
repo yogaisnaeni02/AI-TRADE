@@ -82,17 +82,20 @@ def daftar_file() -> list[Path]:
     return files
 
 
-def baca_semua() -> list[dict]:
+def baca_semua(files: Optional[list[Path]] = None) -> list[dict]:
     """Gabungan seluruh journal, duplikat dibuang, terurut waktu masuk.
 
     Duplikat dibuang berdasarkan `ticket` - satu posisi hanya boleh muncul
     sekali walau filenya tersalin ke beberapa tempat. Baris tanpa ticket
     dipertahankan apa adanya (tidak bisa dibandingkan).
+
+    `files` kosong = semua journal di logs/. PC utama mengisinya dengan
+    journal kiriman worker (laporan/<pc>/trades__<pc>.csv).
     """
     hasil: dict[str, dict] = {}
     tanpa_ticket: list[dict] = []
 
-    for f in daftar_file():
+    for f in (daftar_file() if files is None else files):
         # Label PC diambil dari nama file, supaya baris lama yang belum
         # punya kolom `pc` tetap bisa ditelusuri asalnya.
         asal = f.stem[len("trades__"):] if f.stem.startswith("trades__") else "lama"

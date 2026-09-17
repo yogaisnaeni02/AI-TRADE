@@ -34,6 +34,7 @@ from ..strategy import sessions, structure
 from ..monitoring import notifier
 from ..monitoring.journal import sync_closed_trades
 from ..strategy.setups import RuleEngine, hitung_skor100
+from ..versi_kode import KODE_UPDATE, alasan_restart, teks_versi
 from .order_manager import OrderManager
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -114,6 +115,7 @@ class TradingBot:
 
         self._last_bar_time: Optional[pd.Timestamp] = None
         self._halt_notified = False
+        self._update_menunggu_dilog = False
         self._entry_info: dict[int, dict] = {}  # ticket -> {entry, sl_dist, be_done}
 
         LOG_DIR.mkdir(exist_ok=True)
@@ -147,6 +149,33 @@ class TradingBot:
 
     def stop_requested(self) -> bool:
         return STOP_FILE.exists()
+
+    def _siap_berhenti_untuk_update(self) -> bool:
+        """PC worker meminta restart untuk kode/penugasan baru?
+
+        Hanya dipenuhi saat bot ini TIDAK punya posisi terbuka. Posisi yang
+        ditinggal bot kehilangan trailing, break-even, dan max_bars_hold -
+        tinggal SL/TP di server. Selama masih ada posisi, permintaan
+        ditunda (dicatat sekali) dan dicek lagi tiap siklus.
+
+        Di luar PC worker file flag itu tidak pernah ada, jadi perilaku
+        bot yang dijalankan lewat .bat biasa tidak berubah.
+        """
+        alasan = alasan_restart(LOG_DIR)
+        if alasan is None or self.orders is None:
+            self._update_menunggu_dilog = False
+            return False
+        try:
+            n_open = len(self.orders.get_positions())
+        except Exception:  # noqa: BLE001
+            return False
+        if n_open:
+            if not self._update_menunggu_dilog:
+                self.log(f"Worker meminta restart ({alasan}) - menunggu {n_open} posisi tertutup.")
+                self._update_menunggu_dilog = True
+            return False
+        self.log(f"Worker meminta restart ({alasan}) - tidak ada posisi terbuka, bot berhenti.")
+        return True
 
     def write_snapshot(self) -> None:
         """Tulis state ke JSON agar dashboard bisa membacanya tanpa
@@ -670,6 +699,7 @@ class TradingBot:
 
         self.log("=" * 58)
         self.log(f"BOT START — mode {self.mode} — VARIAN: {self.variant_name}")
+        self.log(f"Versi kode: {teks_versi(ROOT)}")
         self.log(f"Akun {acc.login} @ {acc.server} ({'DEMO' if is_demo else 'REAL'})")
         self.log(f"Equity Rp {acc.equity:,.0f} | simbol {self.symbol}")
         self.log(f"Setup: {self.allowed_setups} skor {self.min_score}-{self.max_score}")
@@ -745,6 +775,7 @@ class TradingBot:
             "mt5_disconnect_seconds",
             self.risk.risk.get("circuit_breaker", {}).get("mt5_disconnect_seconds", 30),
         )
+        keluar_untuk_update = False
 
         try:
             while True:
@@ -813,6 +844,10 @@ class TradingBot:
                         pass
 
                     self.risk.save_state()
+
+                    if self._siap_berhenti_untuk_update():
+                        keluar_untuk_update = True
+                        break
 
                 except Exception as e:  # noqa: BLE001
                     # JANGAN biarkan reconnect mematikan bot.
@@ -900,6 +935,11 @@ class TradingBot:
 
             self.gw.disconnect()
             self._release_lock()
+
+        # Kode keluar khusus agar peluncur worker tahu ini berhenti untuk
+        # update, bukan crash - lalu langsung memasang versi baru.
+        if keluar_untuk_update:
+            raise SystemExit(KODE_UPDATE)
 
 
 if __name__ == "__main__":
