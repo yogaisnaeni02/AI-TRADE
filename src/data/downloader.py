@@ -93,7 +93,10 @@ def download_timeframe(
     # padahal pasar tutup 21:00-22:00 UTC.
     #
     # Sekarang kedua jalur memanggil sumber yang sama.
-    offset_hours = detect_server_offset_hours()
+    # strict=True: downloader harus MENGUKUR (bukan memakai nilai pelacak
+    # yang berawal dari config), kalau tidak pemeriksaan di bawah tidak
+    # pernah bisa gagal. Tick basi (pasar tutup) ditolak.
+    offset_hours = detect_server_offset_hours(strict=True)
 
     configured = cfg["broker"].get("server_utc_offset")
     if configured is not None and configured != offset_hours:

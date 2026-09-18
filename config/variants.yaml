@@ -300,15 +300,27 @@ varian:
       stabilitas: "positif kedua paruh (+0,013 / +0,025)"
       kena: "237 dari 1440 trade (16,5%)"
     peringatan: >
-      Perbaikannya TIPIS: +0,018R per trade (~6%), dan nilai t justru turun
-      sedikit (5,92 -> 5,82). Ini mengunci profit, bukan menemukan edge
-      baru. Jangan berharap perubahan besar.
+      DIUKUR ULANG seperti bot live (backtest/simulasi_live.py, docs/70):
+      auto-close KALAH dari induknya dua_arah - 100 hari data Exness +47,2R
+      vs +60,6R, 30 hari -11,6R vs -0,5R. Ia lebih sering memotong trade
+      yang akan TP daripada menyelamatkan yang akan SL. Angka +0,018R di
+      bawah diukur tanpa memodelkan cara bot menilai skor, jadi tidak
+      berlaku untuk bot live. Pertimbangkan menghentikan varian ini.
     override:
       momentum_fib:
         allow_sell: true
         confluence_filter: false
       position_management:
         autoclose_score_drop: 20
+        # Skor dinilai di bar M5 yang SUDAH TUTUP, bukan bar yang sedang
+        # terbentuk (candle dan momentum berkedip selama bar berjalan).
+        # Diukur dengan backtest/simulasi_live.py, halt DD mati (docs/70):
+        #                            bar berjalan  bar tutup  tanpa autoclose
+        #   100 hari Exness (Jun-Sep)    +44,38R     +47,17R    +60,61R
+        #   30 hari (16 Agu-15 Sep)      -15,66R     -11,61R     -0,53R
+        # Bar tutup lebih baik di kedua periode, tetapi tetap kalah dari
+        # tanpa auto-close - lihat peringatan.
+        autoclose_bar: tutup
 
   autoclose_agresif:
     magic: 20260916
@@ -395,6 +407,31 @@ varian:
 
       position_management:
         autoclose_score_drop: 15
+        # Bar tutup, bukan bar berjalan (docs/70). Diukur pada SL/TP LAMA,
+        # halt DD mati:
+        #                     bar berjalan        bar tutup           pyramid5
+        #   100 hari Exness   -16,27R (467 entry) -13,29R (170 entry) -12,23R
+        #   30 hari           -22,85R (162 entry) -19,86R  (87 entry) -21,09R
+        # Di bar berjalan, auto-close sering menutup dengan untung beberapa
+        # ratus rupiah; satu posisi untung itu membuat batch "tidak rugi
+        # semua", sehingga rem 3 batch rugi tidak pernah menyala dan entry
+        # membengkak. Di bar tutup rem batch kembali bekerja.
+        #
+        # DIUKUR ULANG setelah revisi SL/TP 16 Sep (61c19ef), modal Rp 3 jt,
+        # halt DD mati (docs/70 bagian 11). Angka revisi di commit itu
+        # (+17,79R) SUDAH memakai bar tutup - direproduksi persis.
+        #
+        #                     bar berjalan              bar tutup (dipakai)
+        #   100 hari Exness   +30,15R  maxDD 41,6%      +17,79R  maxDD 55,7%
+        #   30 hari           -12,13R  modal habis      -10,02R  modal habis
+        #                              sejak 21 Agu              sejak 15 Sep
+        #
+        # TIDAK KONSISTEN: di SL/TP lama bar tutup menang di kedua periode;
+        # di SL/TP baru periode panjang memilih bar berjalan (+12R), periode
+        # pendek memilih bar tutup (+2R, tercemar efek jalur - versi bar
+        # berjalan kehabisan modal 25 hari lebih awal). Dibiarkan "tutup"
+        # karena tidak ada dasar kuat untuk membalik. KEPUTUSAN TERBUKA.
+        autoclose_bar: tutup
         # 48 -> 96 bar, sama dengan pyramid5. Dari log NYATA: trade yang
         # MENANG butuh median 92,8 menit, yang kalah hanya 29,1 menit.
         #
@@ -418,6 +455,92 @@ varian:
         max_loss_percent: 45.0
       weekly:
         max_loss_percent: 45.0
+
+  # ---------------------------------------------------------------------
+  # VARIAN UJI SEMENTARA - khusus akun DEMO, HAPUS setelah testing selesai
+  #
+  # Salinan persis empat varian di atas dengan SATU perbedaan: halt
+  # drawdown global dimatikan (max_drawdown_percent 100). Tujuannya
+  # mengumpulkan data tanpa bot berhenti permanen di tengah jalan. Batas 12
+  # trade/hari, 3 loss beruntun, rugi harian 4% dan mingguan 8% TETAP aktif.
+  #
+  # Kenapa HANYA halt DD yang dimatikan (docs/70 bagian 10, 100 hari Exness):
+  #   semua rem aktif     : keempat varian HALT di awal, cuma 23-77 entry
+  #   halt DD dimatikan   : baseline +33,70R  konfluensi +32,61R
+  #                         dua_arah +60,61R  dua_arah_konfluensi +50,11R
+  #   batas trade dibuka  : LEBIH BURUK di dua periode - 57 trade tambahan,
+  #                         semua masuk di hari yang sudah untung & panas
+  #                         (>=3 TP), hanya 3 yang menang, total -45,9R
+  #   tanpa batas apa pun : dua varian dua arah kehabisan modal
+  #
+  # Magic sendiri supaya journal dan sidik jari tidak tercampur dengan
+  # varian aslinya. JANGAN ke akun real: tanpa halt, drawdown terukur ~24%.
+  # ---------------------------------------------------------------------
+
+  uji_baseline:
+    magic: 20260917
+    deskripsi: >
+      baseline tanpa halt drawdown permanen - khusus uji demo.
+    status: uji-demo-sementara
+    dokumen: docs/70-SIMULASI-LIVE-DAN-PERBAIKAN-REM.md
+    peringatan: >
+      Halt drawdown 20% DIMATIKAN. Hanya akun demo; hapus setelah uji.
+    override:
+      momentum_fib:
+        allow_sell: false
+        confluence_filter: false
+    override_risk:
+      global:
+        max_drawdown_percent: 100.0
+
+  uji_konfluensi:
+    magic: 20260918
+    deskripsi: >
+      konfluensi tanpa halt drawdown permanen - khusus uji demo.
+    status: uji-demo-sementara
+    dokumen: docs/70-SIMULASI-LIVE-DAN-PERBAIKAN-REM.md
+    peringatan: >
+      Halt drawdown 20% DIMATIKAN. Hanya akun demo; hapus setelah uji.
+    override:
+      momentum_fib:
+        allow_sell: false
+        confluence_filter: true
+    override_risk:
+      global:
+        max_drawdown_percent: 100.0
+
+  uji_dua_arah:
+    magic: 20260919
+    deskripsi: >
+      dua_arah tanpa halt drawdown permanen - khusus uji demo.
+    status: uji-demo-sementara
+    dokumen: docs/70-SIMULASI-LIVE-DAN-PERBAIKAN-REM.md
+    peringatan: >
+      Halt drawdown 20% DIMATIKAN. Hanya akun demo; hapus setelah uji.
+      Sisi sell tetap belum punya edge terbukti (docs/43).
+    override:
+      momentum_fib:
+        allow_sell: true
+        confluence_filter: false
+    override_risk:
+      global:
+        max_drawdown_percent: 100.0
+
+  uji_dua_arah_konfluensi:
+    magic: 20260920
+    deskripsi: >
+      dua_arah_konfluensi tanpa halt drawdown permanen - khusus uji demo.
+    status: uji-demo-sementara
+    dokumen: docs/70-SIMULASI-LIVE-DAN-PERBAIKAN-REM.md
+    peringatan: >
+      Halt drawdown 20% DIMATIKAN. Hanya akun demo; hapus setelah uji.
+    override:
+      momentum_fib:
+        allow_sell: true
+        confluence_filter: true
+    override_risk:
+      global:
+        max_drawdown_percent: 100.0
 
   ml_walkforward:
     magic: 20260913

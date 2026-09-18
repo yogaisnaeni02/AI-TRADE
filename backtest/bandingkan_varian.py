@@ -17,6 +17,14 @@ harian yang memang bagian dari strategi. Guardrail lain (batas trade
 harian, loss beruntun, rugi harian) TETAP AKTIF, sesuai standar yang
 disepakati setelah insiden baseline salah ukur (docs/38).
 
+BATASAN ENGINE (docs/70)
+------------------------
+engine.py tidak memodelkan auto-close, mode batch, maupun langkah SL ke
+titik impas sebelum trailing - varian autoclose akan tampil identik dengan
+induknya di sini. Untuk autoclose, autoclose_agresif, dan pyramid5 pakai
+backtest/simulasi_live.py, yang memakai aturan posisi dan rem yang sama
+dengan bot live.
+
 PEMAKAIAN
 ---------
     python backtest/bandingkan_varian.py

@@ -36,6 +36,24 @@ def terkirim(monkeypatch):
     return pesan
 
 
+def _notifier_segar():
+    """Salinan modul notifier yang berdiri sendiri.
+
+    tests/test_bot_manage.py mengganti notifier.send dengan stub saat
+    diimpor, supaya tesnya tidak pernah mengirim Telegram sungguhan. Tes
+    di bawah justru menguji isi send() itu sendiri, jadi ia memakai
+    salinan modul sendiri - bukan mengembalikan stub milik tes lain.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "notifier_uji", ROOT / "src" / "monitoring" / "notifier.py"
+    )
+    modul = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(modul)
+    return modul
+
+
 def test_label_pc_dan_varian_ikut_di_tiap_pesan(monkeypatch):
     dikirim = {}
 
@@ -43,13 +61,14 @@ def test_label_pc_dan_varian_ikut_di_tiap_pesan(monkeypatch):
         dikirim["body"] = req.data       # isi ada di objek Request
         raise OSError("tidak benar-benar dikirim")
 
-    monkeypatch.setattr(notifier, "_load_telegram_config", lambda: ("token", "chat"))
-    monkeypatch.setattr(notifier, "_LABEL", "PC Kantor")
-    monkeypatch.setattr(notifier, "_VARIAN", "dua_arah_konfluensi")
+    segar = _notifier_segar()
+    monkeypatch.setattr(segar, "_load_telegram_config", lambda: ("token", "chat"))
+    monkeypatch.setattr(segar, "_LABEL", "PC Kantor")
+    monkeypatch.setattr(segar, "_VARIAN", "dua_arah_konfluensi")
     import urllib.request
 
     monkeypatch.setattr(urllib.request, "urlopen", palsu)
-    assert notifier.send("halo") is False          # gagal kirim tidak melempar
+    assert segar.send("halo") is False          # gagal kirim tidak melempar
     isi = dikirim["body"].decode()
     assert "PC+Kantor" in isi and "dua_arah_konfluensi" in isi
 

@@ -18,31 +18,23 @@ Fokus pada tiga perbaikan 10 Sep 2026:
 from __future__ import annotations
 
 import sys
-import types
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 # -- palsukan MetaTrader5 sebelum modul apa pun mengimpornya -------------
+#
+# Lewat helper BERSAMA: `pytest tests/` mengimpor beberapa file tes dalam
+# satu proses, dan modul produksi mengikat `mt5` saat diimpor pertama kali.
+# Kalau tiap file tes memasang objek palsunya sendiri, file yang diimpor
+# belakangan menambal objek yang tidak dipakai modul produksi - lihat
+# tests/mt5_palsu.py.
 
-RETCODE_DONE = 10009
+from tests.mt5_palsu import pasang  # noqa: E402
 
-fake = types.ModuleType("MetaTrader5")
-fake.TRADE_RETCODE_DONE = RETCODE_DONE
-fake.TRADE_ACTION_DEAL = 1
-fake.TRADE_ACTION_SLTP = 2
-fake.ORDER_TYPE_BUY = 0
-fake.ORDER_TYPE_SELL = 1
-fake.POSITION_TYPE_BUY = 0
-fake.POSITION_TYPE_SELL = 1
-fake.ORDER_FILLING_IOC = 1
-fake.ORDER_FILLING_FOK = 2
-fake.ORDER_FILLING_RETURN = 3
-fake.ORDER_TIME_GTC = 0
-fake.DEAL_TYPE_BUY = 0
-fake.last_error = lambda: (0, "ok")
-sys.modules["MetaTrader5"] = fake
+fake = pasang()
+RETCODE_DONE = fake.TRADE_RETCODE_DONE
 
 from src.execution import order_manager as OM  # noqa: E402
 
@@ -213,6 +205,42 @@ def test_risk_idr_dari_deal():
     # SL tidak diketahui -> pakai sl_typical_points
     fallback = _risk_idr_from_deal(entry, 0.0, cfg)
     assert abs(fallback - 4000 * 1748.36 * 0.01) < 1, fallback
+
+
+def test_posisi_tertutup_dari_riwayat_deal():
+    """posisi_tertutup(): sumber rem risiko di bot. Juga regresi r_multiple
+    yang selalu kosong karena membagi dengan argumen yang tidak pernah diisi."""
+    import time
+    from src.monitoring import journal as J
+
+    t0 = int(time.time()) - 3600
+
+    def deal(pos, t, magic, typ, price, profit=0.0):
+        return Obj(position_id=pos, time=t, magic=magic, type=typ, price=price,
+                   volume=0.01, profit=profit, commission=0.0, swap=0.0,
+                   symbol="XAUUSDm", comment="momentum_fib_6_ab12")
+
+    deals = [
+        # ditutup manual: deal exit bermagic 0, entry bermagic baseline
+        deal(1, t0, 20260909, 0, 4400.0), deal(1, t0 + 600, 0, 1, 4404.0, profit=69_934.4),
+        deal(2, t0, 20260914, 1, 4400.0), deal(2, t0 + 300, 20260914, 0, 4404.0, profit=-69_934.4),
+        deal(3, t0, 20260909, 0, 4400.0),                                  # masih terbuka
+        deal(4, t0, 12345, 0, 4400.0), deal(4, t0 + 60, 12345, 1, 4401.0, profit=1_000),  # magic asing
+    ]
+    cfg = {
+        "symbol": {"point": 0.001, "value_per_point_idr": 1748.36},
+        "trade_distances": {"sl_typical_points": 4000},
+    }
+    fake.history_deals_get = lambda a, b: deals
+    rows = J.posisi_tertutup(days_back=7, config=cfg)
+    assert sorted(r["ticket"] for r in rows) == [1, 2], rows
+
+    r1 = next(r for r in rows if r["ticket"] == 1)
+    assert r1["magic"] == 20260909 and r1["varian"] == "baseline", r1
+    assert r1["r_multiple"] != "" and abs(r1["r_multiple"] - 1.0) < 0.01, r1
+
+    fake.history_deals_get = lambda a, b: None
+    assert J.posisi_tertutup(days_back=7, config=cfg) is None, "riwayat tak terbaca harus None, bukan []"
 
 
 # -- runner --------------------------------------------------------------

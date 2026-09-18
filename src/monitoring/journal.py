@@ -131,20 +131,22 @@ def _sebab_exit(reason: int, net_idr: float) -> str:
     return "ditutup manual"
 
 
-def sync_closed_trades(days_back: int = 30, risk_per_trade_idr: float = 0.0,
-                       config: dict | None = None) -> list[dict]:
+def posisi_tertutup(days_back: int = 7, config: dict | None = None,
+                    risk_per_trade_idr: float = 0.0) -> list[dict] | None:
     """
-    Ambil posisi yang sudah tertutup dari MT5 dan catat yang belum ada.
+    Semua posisi TERTUTUP milik sistem (magic varian terdaftar mana pun)
+    dalam `days_back` hari terakhir, sebagai baris berkolom FIELDS.
 
-    Mengembalikan BARIS trade baru yang dicatat (kosong bila tidak ada).
-    Aman dipanggil berulang — trade yang sudah tercatat dilewati.
+    Dipisah dari sync_closed_trades() supaya bot bisa menghitung rem risiko
+    LANGSUNG dari riwayat MT5, tanpa bergantung pada penulisan CSV.
+
+    Mengembalikan None bila riwayat MT5 tidak terbaca - pemanggil wajib
+    membedakannya dari [] (memang belum ada trade).
 
     Tiap baris juga memuat "sebab" (TP/SL/trailing/ditutup bot) untuk
     notifikasi. Kolom itu TIDAK ditulis ke CSV: skema journal dipakai
     dashboard dan pembanding backtest, jadi sengaja tidak diubah.
     """
-    LOG_DIR.mkdir(exist_ok=True)
-
     if config is None:
         from ..data.mt5_gateway import load_config
         config = load_config()
@@ -155,7 +157,7 @@ def sync_closed_trades(days_back: int = 30, risk_per_trade_idr: float = 0.0,
 
     deals = mt5.history_deals_get(from_time, to_time)
     if deals is None:
-        return []
+        return None
 
     # Kelompokkan SEMUA deal per posisi dulu (tanpa filter magic).
     #
@@ -183,11 +185,10 @@ def sync_closed_trades(days_back: int = 30, risk_per_trade_idr: float = 0.0,
         if any(d.magic in known for d in dl)
     }
 
-    existing = _load_existing_tickets()
-    new_rows = []
+    rows = []
 
     for pos_id, dl in positions.items():
-        if pos_id in existing or len(dl) < 2:
+        if len(dl) < 2:
             continue
 
         dl.sort(key=lambda x: x.time)
@@ -224,7 +225,7 @@ def sync_closed_trades(days_back: int = 30, risk_per_trade_idr: float = 0.0,
         )
         varian = known.get(magic, f"?{magic}")
 
-        new_rows.append({
+        rows.append({
             "ticket": pos_id,
             "symbol": entry.symbol,
             "direction": "buy" if entry.type == mt5.DEAL_TYPE_BUY else "sell",
@@ -237,7 +238,10 @@ def sync_closed_trades(days_back: int = 30, risk_per_trade_idr: float = 0.0,
             "commission": round(comm, 2),
             "swap": round(swap, 2),
             "net_idr": round(net, 2),
-            "r_multiple": round(net / risk_per_trade_idr, 3) if risk_per_trade_idr else "",
+            # DIPERBAIKI LAGI: perbaikan 10 Sep menghitung risk_idr, tetapi
+            # baris ini tetap membagi dengan risk_per_trade_idr (selalu 0
+            # dari bot), sehingga kolom ini tetap kosong di trades.csv.
+            "r_multiple": round(net / risk_idr, 3) if risk_idr else "",
             "duration_min": round(duration, 1),
             "comment": entry.comment,
             "magic": magic,
@@ -246,6 +250,33 @@ def sync_closed_trades(days_back: int = 30, risk_per_trade_idr: float = 0.0,
             "sebab": _sebab_exit(getattr(exit_, "reason", -1), net),
         })
 
+    return rows
+
+
+def sync_closed_trades(days_back: int = 30, risk_per_trade_idr: float = 0.0,
+                       config: dict | None = None,
+                       rows: list[dict] | None = None) -> list[dict]:
+    """
+    Catat posisi tertutup yang belum ada di logs/trades.csv.
+
+    `rows` = hasil posisi_tertutup() yang sudah dibaca pemanggil (bot memakai
+    baris yang sama untuk rem risiko, jadi riwayat MT5 cukup dibaca sekali).
+    None = baca sendiri dari MT5.
+
+    Mengembalikan BARIS trade baru yang dicatat (kosong bila tidak ada);
+    bot memakainya untuk notifikasi hasil tiap posisi. Aman dipanggil
+    berulang — trade yang sudah tercatat dilewati. Kegagalan menulis file
+    DILEMPAR, bukan ditelan: pemanggil yang memutuskan cara melaporkannya.
+    """
+    LOG_DIR.mkdir(exist_ok=True)
+
+    if rows is None:
+        rows = posisi_tertutup(days_back, config, risk_per_trade_idr)
+        if rows is None:
+            return []
+
+    existing = _load_existing_tickets()
+    new_rows = [r for r in rows if int(r["ticket"]) not in existing]
     if not new_rows:
         return []
 

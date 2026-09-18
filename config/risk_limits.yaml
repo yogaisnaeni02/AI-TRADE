@@ -178,6 +178,36 @@ global:
   # KEMBALIKAN KE 1 sebelum akun real sampai pyramiding terbukti di demo.
   max_open_positions: 2
 
+  # Jarak minimal antara entry BARU dan posisi yang sudah terbuka, dalam
+  # kelipatan ATR saat sinyal. 0 = mati (perilaku lama, default).
+  #
+  # ALASAN: 16 Sep 2026 bot membuka 7 posisi BUY di 4325-4327 dalam setengah
+  # jam; koreksi wajar 6 poin ke 4321 menyapu ketujuhnya sekaligus
+  # (docs/AnalisaLog/KESIMPULAN-ANALISA-LOG-16SEP2026.md). Posisi yang
+  # menumpuk di harga hampir sama bukan diversifikasi - SL-nya berdekatan
+  # sehingga kena bersamaan.
+  #
+  # Pola yang sama sudah tercatat di backtest (lihat catatan
+  # max_open_positions di atas): jeda antar entry median 5 menit, 119
+  # kejadian tutup-bareng, 347 trade, rugi Rp 17,9 juta.
+  #
+  # SUDAH DIUKUR (docs/70 bagian 8), dan hasilnya HARUS dibaca sebelum
+  # menyalakan: aturan ini TIDAK menaikkan hasil. Pada 100 hari data Exness
+  # ketiga varian yang menumpuk posisi justru memburuk, monoton seiring
+  # jarak diperbesar:
+  #
+  #   dua_arah           0 -> +60,61R   |  1,5 ATR -> +9,60R
+  #   pyramid5           0 -> -12,23R   |  1,5 ATR -> -20,77R
+  #   autoclose_agresif  0 -> -13,29R   |  1,5 ATR -> -19,90R
+  #
+  # Yang membaik konsisten hanya DRAWDOWN varian pyramid: 61,7% -> 33,7%
+  # dan 57,6% -> 31,9%. Jadi ini alat kontrol risiko, bukan perbaikan
+  # profit - menukar sebagian hasil dengan drawdown yang jauh lebih kecil.
+  #
+  # Nilai per varian diatur lewat override_risk di config/variants.yaml,
+  # bukan di sini.
+  min_jarak_entry_atr: 0.0
+
 # Position sizing adaptif - lot lebih besar saat keyakinan sinyal tinggi.
 #
 # NONAKTIF secara default, dan itu disengaja.

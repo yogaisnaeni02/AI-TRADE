@@ -25,16 +25,22 @@ from typing import Optional
 import MetaTrader5 as mt5
 import pandas as pd
 
-from ..data.mt5_gateway import MT5Gateway, detect_server_offset_hours, load_config
+from ..data.mt5_gateway import (
+    MT5Gateway,
+    ambil_pesan_offset,
+    detect_server_offset_hours,
+    load_config,
+)
 from ..features.indicators import add_all, add_extended
 from ..features.pipeline import build_htf_context
 from ..config_fingerprint import describe as cfg_describe, fingerprint as cfg_fingerprint
 from ..risk.manager import RiskManager
 from ..strategy import sessions, structure
 from ..monitoring import notifier
-from ..monitoring.journal import sync_closed_trades
-from ..strategy.setups import RuleEngine, hitung_skor100
+from ..monitoring.journal import posisi_tertutup, sync_closed_trades
+from ..strategy.setups import RuleEngine
 from ..versi_kode import KODE_UPDATE, alasan_restart, teks_versi
+from .manajemen_posisi import ParamPosisi, putuskan, skor_awal_dari_data
 from .order_manager import OrderManager
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -80,24 +86,23 @@ class TradingBot:
 
         # Parameter operasional dibaca dari config agar backtest dan live
         # memakai angka yang sama persis.
-        pm = self.cfg.get("position_management", {})
         self.gw = MT5Gateway(self.cfg)
         self.rules = RuleEngine(self.cfg)
-        self.risk = RiskManager(self.cfg, risk=risk_cfg)
+        # Rem dihitung per MAGIC varian ini, bukan seluruh journal - lihat
+        # catatan di RiskManager.__init__.
+        self.risk = RiskManager(self.cfg, risk=risk_cfg, magic=self._magic)
         self.orders: Optional[OrderManager] = None
 
-        self.breakeven_at_r = (
-            breakeven_at_r if breakeven_at_r is not None else pm.get("breakeven_at_r", 1.5)
+        # BE, trailing, auto-close, dan timeout. Logikanya di
+        # manajemen_posisi.py, dipakai juga backtest/simulasi_live.py supaya
+        # simulasi dan live memutuskan hal yang sama.
+        self.param_posisi = ParamPosisi.dari_config(
+            self.cfg, breakeven_at_r=breakeven_at_r, trail_atr_mult=trail_atr_mult
         )
-        self.trail_atr_mult = (
-            trail_atr_mult if trail_atr_mult is not None else pm.get("trail_atr_mult", 2.5)
-        )
-        self.max_bars_hold = pm.get("max_bars_hold", 48)
-
-        # Auto-close saat skor keyakinan (0-100) turun sekian poin dari
-        # nilainya saat posisi dibuka. 0 = mati. Hanya berlaku saat posisi
-        # sedang PROFIT - lihat catatan pengukuran di manage_positions().
-        self.autoclose_score_drop = int(pm.get("autoclose_score_drop", 0))
+        self.breakeven_at_r = self.param_posisi.breakeven_at_r
+        self.trail_atr_mult = self.param_posisi.trail_atr_mult
+        self.max_bars_hold = self.param_posisi.max_bars_hold
+        self.autoclose_score_drop = self.param_posisi.autoclose_score_drop
         self.min_score = min_score
         self.max_score = max_score
         self.allowed_setups = tuple(
@@ -122,6 +127,7 @@ class TradingBot:
         self._halt_notified = False
         self._update_menunggu_dilog = False
         self._entry_info: dict[int, dict] = {}  # ticket -> {entry, sl_dist, be_done}
+        self._masalah: dict[str, tuple[str, float]] = {}  # sumber -> (pesan, waktu lapor)
 
         LOG_DIR.mkdir(exist_ok=True)
         self.log_path = LOG_DIR / f"bot_{datetime.now():%Y%m%d}.log"
@@ -239,7 +245,12 @@ class TradingBot:
         # Server broker bisa bergeser (DST, migrasi) tanpa pemberitahuan;
         # offset statis membuat bot salah menghitung sesi dan diam padahal
         # seharusnya aktif.
+        #
+        # Sejak offset_server.PelacakOffset: nilai baru hanya dipakai bila
+        # konsisten, supaya tick basi saat pasar jeda tidak menggeser jam.
         offset = detect_server_offset_hours()
+        for pesan in ambil_pesan_offset():
+            self.log(f"!! {pesan}")
         df["time_utc"] = df["time"] - pd.Timedelta(hours=offset)
         return df.drop(columns=["time"])
 
@@ -285,111 +296,91 @@ class TradingBot:
     # -- manajemen posisi -------------------------------------------------
 
     def manage_positions(self, df: pd.DataFrame) -> None:
-        """Break-even dan trailing stop untuk posisi terbuka."""
+        """Terapkan keputusan manajemen_posisi.putuskan() ke posisi terbuka.
+
+        Aturannya (BE, trailing, auto-close, timeout) sengaja tidak ditulis di
+        sini lagi: backtest/simulasi_live.py memakai fungsi yang sama, jadi
+        yang diukur simulasi adalah yang dijalankan bot.
+
+        Catatan pengukuran auto-close yang dulu tertulis di sini (sapuan
+        ambang 10-40 pada 1.440 trade, terbaik turun >=20: E[R] +0,2994 vs
+        +0,2815 tanpa auto-close) TIDAK memodelkan bar berjalan yang dipakai
+        bot. Ukuran ulang dengan cara live ada di docs/70.
+
+        Timeout dihitung dari SELISIH WAKTU bar, bukan jumlah panggilan
+        (DIPERBAIKI 15 Sep 2026 - dengan poll 3 detik penghitung per panggilan
+        mencapai 48 "bar" dalam 2,4 menit).
+        """
         last = df.iloc[-1]
-        atr_now = last["atr"]
-        if pd.isna(atr_now) or atr_now <= 0:
-            return
+        bar_tutup = df.iloc[-2] if len(df) > 1 else None
 
         for pos in self.orders.get_positions():
             info = self._entry_info.get(pos.ticket)
             if info is None:
-                # Posisi dari sesi sebelumnya — rekonstruksi dari data broker.
-                # `bar_entry` diambil dari waktu buka posisi milik broker,
-                # bukan bar sekarang; tanpa itu timeout terhitung ulang dari
-                # nol setiap kali bot di-restart, dan posisi lama bisa
-                # tertahan jauh melebihi max_bars_hold.
-                info = {
-                    "entry": pos.price_open,
-                    "sl_dist": abs(pos.price_open - pos.sl) if pos.sl else atr_now,
-                    "be_done": False,
-                    "bar_entry": pd.Timestamp(pos.time, unit="s"),
-                }
+                info = self._rekonstruksi_posisi(pos, df)
                 self._entry_info[pos.ticket] = info
+            info.setdefault("bar_entry", last["time_utc"])
 
             is_buy = pos.type == mt5.POSITION_TYPE_BUY
-            price = last["close"]
-            r_dist = info["sl_dist"]
-            profit_dist = (price - info["entry"]) if is_buy else (info["entry"] - price)
+            k = putuskan(info, is_buy, pos.sl, last, bar_tutup, self.param_posisi)
 
-            new_sl = None
+            if k.sl_baru is not None:
+                if k.be_baru:
+                    info["be_done"] = True
+                    self.log(f"  BE ticket {pos.ticket} -> SL {k.sl_baru:.3f}")
+                if self.orders.modify_position(pos.ticket, k.sl_baru):
+                    self.log(f"  SL ticket {pos.ticket} -> {k.sl_baru:.3f}")
 
-            if not info["be_done"] and profit_dist >= r_dist * self.breakeven_at_r:
-                spread_buf = self.cfg["costs"]["spread_points"] * self.point
-                new_sl = info["entry"] + spread_buf if is_buy else info["entry"] - spread_buf
-                info["be_done"] = True
-                self.log(f"  BE ticket {pos.ticket} -> SL {new_sl:.3f}")
-
-            elif info["be_done"]:
-                trail = (price - atr_now * self.trail_atr_mult) if is_buy else (
-                    price + atr_now * self.trail_atr_mult
+            if k.tutup is None:
+                continue
+            res = self.orders.close_position(pos.ticket)
+            if not res.success:
+                continue
+            if k.tutup == "autoclose":
+                self.log(
+                    f"  AUTOCLOSE ticket {pos.ticket}: skor {k.skor_awal}->{k.skor_kini} "
+                    f"(turun {k.skor_awal - (k.skor_kini or 0)}, bar "
+                    f"{self.param_posisi.autoclose_bar}) -> ditutup @ {res.price:.3f}"
                 )
-                if (is_buy and trail > pos.sl) or (not is_buy and trail < pos.sl):
-                    new_sl = trail
+            else:
+                self.log(
+                    f"  TIMEOUT ticket {pos.ticket} setelah {k.umur_bar} bar "
+                    f"-> ditutup @ {res.price:.3f}"
+                )
+            self._entry_info.pop(pos.ticket, None)
 
-            if new_sl is not None:
-                if self.orders.modify_position(pos.ticket, new_sl):
-                    self.log(f"  SL ticket {pos.ticket} -> {new_sl:.3f}")
+    def _rekonstruksi_posisi(self, pos, df: pd.DataFrame) -> dict:
+        """State posisi yang dibuka sebelum bot di-restart.
 
-            # AUTO-CLOSE saat keyakinan menurun tajam.
-            #
-            # Dijalankan HANYA bila posisi sedang PROFIT - tujuannya mengunci
-            # sebagian keuntungan saat kondisi yang mendasari sinyal sudah
-            # memudar, bukan memotong kerugian (itu tugas SL).
-            #
-            # Ambang 20 poin dipilih dari sapuan pada 1.440 trade backtest:
-            #   tanpa auto-close  E[R]=+0,2815
-            #   turun >=10        E[R]=+0,2477  (terlalu sensitif, merugikan)
-            #   turun >=15        E[R]=+0,2835
-            #   turun >=20        E[R]=+0,2994  <- terbaik
-            #   turun >=25        E[R]=+0,2855
-            #   turun >=40        E[R]=+0,2672
-            # Stabil di kedua paruh data (+0,013 dan +0,025).
-            #
-            # KEJUJURAN UKURAN: perbaikannya tipis (+0,018R per trade, ~6%)
-            # dan nilai t justru turun sedikit (5,92 -> 5,82). Ini mengunci
-            # profit, bukan menemukan edge baru.
-            if self.autoclose_score_drop > 0 and profit_dist > 0:
-                skor_awal = info.get("score100", 0)
-                if skor_awal > 0:
-                    skor_kini = hitung_skor100(last, "buy" if is_buy else "sell")
-                    turun = skor_awal - skor_kini
-                    if turun >= self.autoclose_score_drop:
-                        res = self.orders.close_position(pos.ticket)
-                        if res.success:
-                            self.log(
-                                f"  AUTOCLOSE ticket {pos.ticket}: skor "
-                                f"{skor_awal}->{skor_kini} (turun {turun}) "
-                                f"-> ditutup @ {res.price:.3f}"
-                            )
-                            self._entry_info.pop(pos.ticket, None)
-                            continue
+        `bar_entry` diambil dari waktu buka milik broker, bukan bar sekarang;
+        tanpa itu timeout terhitung ulang dari nol setiap restart.
 
-            # Timeout: tutup posisi yang ditahan melebihi batas.
-            # Backtest memakai batas yang sama, jadi live harus konsisten.
-            #
-            # DIPERBAIKI 15 Sep 2026: dulu `bars` ditambah 1 tiap panggilan
-            # manage_positions(). Itu benar selama fungsi ini hanya dipanggil
-            # sekali per bar M5 - tetapi sejak dipindah ke loop utama (agar
-            # trailing dicek tiap siklus), penghitung itu akan melonjak
-            # sesuai interval polling: dengan poll 3 detik, batas 48 bar
-            # tercapai dalam 2,4 MENIT, bukan 4 jam.
-            #
-            # Sekarang umur posisi dihitung dari SELISIH WAKTU bar, bukan
-            # jumlah panggilan - kebal terhadap perubahan interval polling.
-            bar_now = last["time_utc"]
-            bar_entry = info.setdefault("bar_entry", bar_now)
-            info["bars"] = int(
-                (pd.Timestamp(bar_now) - pd.Timestamp(bar_entry)).total_seconds() // 300
-            )
-            if info["bars"] > self.max_bars_hold:
-                res = self.orders.close_position(pos.ticket)
-                if res.success:
-                    self.log(
-                        f"  TIMEOUT ticket {pos.ticket} setelah "
-                        f"{info['bars']} bar -> ditutup @ {res.price:.3f}"
-                    )
-                    self._entry_info.pop(pos.ticket, None)
+        DIPERBAIKI: dulu `score100` tidak direkonstruksi, sehingga auto-close
+        diam-diam MATI untuk setiap posisi yang melewati restart. Sekarang
+        skor dihitung ulang dari bar sinyal di data yang sama. `be_done` juga
+        dikenali dari SL yang sudah melewati harga entry.
+        """
+        is_buy = pos.type == mt5.POSITION_TYPE_BUY
+        arah = "buy" if is_buy else "sell"
+        waktu_entry = pd.Timestamp(pos.time, unit="s") - pd.Timedelta(
+            hours=detect_server_offset_hours()
+        )
+        skor, bar_sinyal = skor_awal_dari_data(df, waktu_entry, arah)
+        be_done = bool(pos.sl) and (
+            (is_buy and pos.sl >= pos.price_open) or (not is_buy and pos.sl <= pos.price_open)
+        )
+        self.log(
+            f"  posisi lama ticket {pos.ticket} direkonstruksi: skor awal "
+            f"{skor if skor else 'tidak ditemukan (auto-close tidak berlaku)'}"
+            f"{', SL sudah di titik impas' if be_done else ''}"
+        )
+        return {
+            "entry": pos.price_open,
+            "sl_dist": abs(pos.price_open - pos.sl) if pos.sl else df.iloc[-1]["atr"],
+            "be_done": be_done,
+            "bar_entry": bar_sinyal if bar_sinyal is not None else waktu_entry,
+            "score100": skor,
+        }
 
     # -- siklus -----------------------------------------------------------
 
@@ -413,9 +404,6 @@ class TradingBot:
 
         # Di dalam sesi: laporkan syarat mana yang belum terpenuhi
         kurang = []
-        if pd.notna(row.get("mom_24")) and pd.notna(row.get("mom_24_q85")):
-            if row["mom_24"] <= row["mom_24_q85"]:
-                kurang.append(f"momentum ({row['mom_24']:.1f}<{row['mom_24_q85']:.1f})")
         if pd.notna(row.get("atr_percentile")):
             # Ambang dibaca dari RuleEngine, BUKAN ditulis ulang di sini.
             #
@@ -430,20 +418,39 @@ class TradingBot:
                     f"ATR {row['atr_percentile']:.2f} "
                     f"(butuh {self.rules.atr_lo:.2f}-{self.rules.atr_hi:.2f})"
                 )
-        if row.get("trend_htf") == "ranging":
-            kurang.append("HTF ranging")
-        elif pd.notna(row.get("fib_position")):
-            # Ambang dibaca dari RuleEngine, bukan ditulis ulang di sini.
-            #
-            # Dulu 0,75/0,25 di-hardcode, sehingga varian yang memakai
-            # ambang lain (autoclose_agresif & pyramid5 memakai 0,70/0,30)
-            # melaporkan angka yang SALAH di heartbeat - terlihat seperti
-            # sinyal ditolak oleh ambang yang sebenarnya tidak berlaku.
-            fp = row["fib_position"]
-            if row["trend_htf"] == "uptrend" and fp <= self.rules.fib_buy_min:
-                kurang.append(f"fib {fp:.2f}<{self.rules.fib_buy_min:.2f}")
-            elif row["trend_htf"] == "downtrend" and fp >= self.rules.fib_sell_max:
-                kurang.append(f"fib {fp:.2f}>{self.rules.fib_sell_max:.2f}")
+        # Arah dulu, lalu fib dan momentum dengan tanda dan ambang yang SAMA
+        # dengan RuleEngine._momentum_fib.
+        #
+        # Ambang dibaca dari RuleEngine, bukan ditulis ulang di sini. Dulu
+        # 0,75/0,25 di-hardcode, sehingga varian yang memakai ambang lain
+        # (autoclose_agresif & pyramid5 memakai 0,70/0,30) melaporkan angka
+        # yang SALAH - terlihat seperti sinyal ditolak oleh ambang yang
+        # sebenarnya tidak berlaku (756b13c).
+        #
+        # Momentum juga dulu hanya diuji untuk sisi buy dan dibandingkan
+        # dengan ambang PENUH, padahal gerbangnya menerima tier reduced di
+        # atas 50% ambang - kondisi sell tidak pernah terlaporkan benar.
+        tren = row.get("trend_htf")
+        if tren not in ("uptrend", "downtrend"):
+            kurang.append(f"HTF {tren}")
+        elif tren == "downtrend" and not self.rules.allow_sell:
+            kurang.append("HTF downtrend (sell tidak aktif)")
+        else:
+            is_buy = tren == "uptrend"
+            fp = row.get("fib_position")
+            if pd.notna(fp):
+                if is_buy and fp <= self.rules.fib_buy_min:
+                    kurang.append(f"fib {fp:.2f}<={self.rules.fib_buy_min:.2f}")
+                elif not is_buy and fp >= self.rules.fib_sell_max:
+                    kurang.append(f"fib {fp:.2f}>={self.rules.fib_sell_max:.2f}")
+            mom, q = row.get("mom_24"), row.get("mom_24_q85")
+            if pd.notna(mom) and pd.notna(q):
+                mom_arah = mom if is_buy else -mom
+                if mom_arah <= 0.5 * q:
+                    kurang.append(
+                        f"momentum {'naik' if is_buy else 'turun'} "
+                        f"({mom_arah:.1f}<={0.5 * q:.1f})"
+                    )
 
         if kurang:
             self.log(
@@ -508,6 +515,72 @@ class TradingBot:
             )
         except Exception:  # noqa: BLE001
             pass
+
+    MASALAH_ULANG_DETIK = 3600
+
+    def _lapor_masalah(self, sumber: str, err: Exception) -> None:
+        """Log + Telegram untuk kegagalan yang dulu ditelan diam-diam.
+
+        Dibatasi sekali per jam per sumber (atau saat pesannya berubah) supaya
+        polling 3 detik tidak membanjiri log dan Telegram.
+        """
+        pesan = f"{type(err).__name__}: {err}"
+        sekarang = time.time()
+        lama = self._masalah.get(sumber)
+        if lama and lama[0] == pesan and sekarang - lama[1] < self.MASALAH_ULANG_DETIK:
+            return
+        self._masalah[sumber] = (pesan, sekarang)
+        self.log(f"!! {sumber} gagal: {pesan}")
+        try:
+            notifier.send(f"⚠️ {sumber} gagal\n{pesan}")
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _pulih(self, sumber: str) -> None:
+        if self._masalah.pop(sumber, None):
+            self.log(f"{sumber} pulih kembali.")
+
+    def _sinkron_rem_dan_journal(self) -> None:
+        """
+        Rem risiko dari riwayat MT5 LANGSUNG; logs/trades.csv hanya catatan.
+
+        DIPERBAIKI: dulu rem hanya diperbarui SETELAH trade baru berhasil
+        ditulis ke logs/trades.csv, dan semua error di jalur itu ditelan
+        (`except Exception: pass`). Kalau penulisan CSV gagal - mis. file
+        sedang dibuka Excel - rem buta tanpa jejak: loss baru tidak pernah
+        dihitung. 14 Sep 2026 bot live tetap entry setelah 4 SL beruntun
+        padahal rem 3-loss sudah ada di kodenya; penyebab pastinya tidak bisa
+        dipastikan tanpa log PC itu, tetapi jalur ini salah satu yang cocok.
+
+        Sekarang: riwayat MT5 dibaca tiap siklus (seperti sebelumnya), rem
+        dihitung dari situ, lalu CSV ditulis. Gagal baca riwayat -> counter
+        rem lama dipertahankan. Gagal apa pun -> dilaporkan.
+        """
+        sumber_mt5, sumber_csv = "baca riwayat deal MT5", "tulis logs/trades.csv"
+        try:
+            baris = posisi_tertutup(days_back=7, config=self.cfg)
+            if baris is None:
+                raise RuntimeError(f"history_deals_get None: {mt5.last_error()}")
+        except Exception as e:  # noqa: BLE001
+            self._lapor_masalah(sumber_mt5, e)
+            return
+        self._pulih(sumber_mt5)
+        self.risk.refresh_from_journal(datetime.now(), trades=baris)
+
+        try:
+            baris_baru = sync_closed_trades(days_back=7, config=self.cfg, rows=baris)
+        except Exception as e:  # noqa: BLE001
+            self._lapor_masalah(sumber_csv, e)
+            return
+        self._pulih(sumber_csv)
+        if baris_baru:
+            self.log(f"Journal: {len(baris_baru)} trade baru dicatat")
+            self.log(
+                f"  Rem: {self.risk.state.day_trades}/{self.risk.max_daily_trades} trade"
+                f" | P/L Rp {self.risk.state.day_pnl:,.0f}"
+                f" | {self._teks_rem_rugi()}"
+            )
+            self._kabari_posisi_tutup(baris_baru)
 
     def _kabari_posisi_tutup(self, baris: list[dict]) -> None:
         """Kirim hasil tiap posisi yang baru tertutup ke Telegram.
@@ -603,6 +676,11 @@ class TradingBot:
             size_tier=sig.get("size_tier", "full"),
             direction=sig["direction"],
             open_directions=arah_terbuka,
+            # Untuk gerbang jarak antar entry (pyramiding). Dibandingkan
+            # dengan harga buka posisi yang sudah ada.
+            atr=float(sig["atr"]),
+            harga=float(sig["entry"]),
+            harga_posisi=[p.price_open for p in posisi_terbuka],
         )
 
         if not decision.allowed:
@@ -783,7 +861,8 @@ class TradingBot:
         # bukan dimulai ulang dari nol.
         self.risk.load_state()
         self.risk.state.peak_equity = max(self.risk.state.peak_equity, acc.equity)
-        self.risk.refresh_from_journal(datetime.now())
+        self.risk.refresh_from_journal(datetime.now())   # cadangan: CSV
+        self._sinkron_rem_dan_journal()                  # sumber utama: riwayat MT5
         self.risk.save_state()
 
         # Kabari bahwa bot benar-benar mulai. Bersama heartbeat berkala dan
@@ -867,29 +946,9 @@ class TradingBot:
 
                     self.write_snapshot()
 
-                    # Catat trade yang baru tertutup ke journal.
-                    # Sumbernya riwayat MT5, bukan state internal - tahan
-                    # terhadap restart atau crash.
-                    try:
-                        # config dioper agar journal bisa menghitung
-                        # r_multiple dari lot + jarak SL tiap posisi.
-                        # Tanpa kolom itu hasil live tidak bisa
-                        # dibandingkan dengan expectancy backtest.
-                        baris_baru = sync_closed_trades(days_back=7, config=self.cfg)
-                        if baris_baru:
-                            self.log(f"Journal: {len(baris_baru)} trade baru dicatat")
-                            # Rekonsiliasi rem risiko dari journal yang baru
-                            # diperbarui. Tanpa langkah ini batas harian,
-                            # mingguan, dan loss beruntun tidak pernah terisi.
-                            self.risk.refresh_from_journal(datetime.now())
-                            self.log(
-                                f"  Rem: {self.risk.state.day_trades}/{self.risk.max_daily_trades} trade"
-                                f" | P/L Rp {self.risk.state.day_pnl:,.0f}"
-                                f" | {self._teks_rem_rugi()}"
-                            )
-                            self._kabari_posisi_tutup(baris_baru)
-                    except Exception:  # noqa: BLE001
-                        pass
+                    # Rem risiko + journal dari riwayat MT5 (tahan restart,
+                    # dan kegagalannya dilaporkan - lihat method-nya).
+                    self._sinkron_rem_dan_journal()
 
                     self.risk.save_state()
 

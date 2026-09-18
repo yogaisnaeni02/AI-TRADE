@@ -50,6 +50,7 @@ Aturan: **klaim satu blok 10 nomor di tabel ini sebelum menulis.**
 | 43–49 | PC kantor | 43 |
 | 50–59 | laptop pribadi | 44 (di luar blok, sisa pergeseran) |
 | 60–69 | PC kantor | — |
+| 70–79 | PC hanif (branch `perbaikan/rem-autoclose-simulasi`) | 70 |
 
 Kalau bloknya habis, tambahkan baris baru di tabel ini **dalam commit yang
 sama** dengan dokumen pertama di blok itu.
@@ -84,9 +85,13 @@ Jalankan ini sebelum menganggap selesai:
 
 ```bash
 python scripts/fix_time_offset.py --check    # data tidak bergeser
-python tests/test_risk_manager.py            # 13 tes
-python tests/test_order_safety.py            # 7 tes
+python tests/test_risk_manager.py            # 18 tes
+python tests/test_order_safety.py            # 8 tes
 python tests/test_structure_choch.py         # 4 tes
+python tests/test_manajemen_posisi.py        # 11 tes
+python tests/test_offset_server.py           # 7 tes
+python tests/test_simulasi_live.py           # 1 tes
+python tests/test_bot_manage.py              # 8 tes
 ```
 
 Dan periksa sidik jari config berubah atau tidak:
