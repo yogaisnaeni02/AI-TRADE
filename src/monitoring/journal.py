@@ -110,13 +110,38 @@ def _risk_idr_from_deal(entry_deal, sl_price: float, cfg: dict) -> float:
     return sl_points * value_per_point * entry_deal.volume
 
 
+def _sebab_exit(reason: int, net_idr: float) -> str:
+    """Terjemahkan `reason` deal penutup MT5 jadi sebab yang bisa dibaca.
+
+    Dipakai notifikasi Telegram supaya "kena TP" dan "ditutup bot karena
+    skor turun" tidak terbaca sama. SL yang berakhir UNTUNG berarti stop
+    sudah digeser (break-even/trailing), bukan kekalahan - membacanya
+    sebagai "SL" akan menyesatkan.
+
+    Konstanta diambil dengan getattr agar tetap bisa diuji tanpa MT5.
+    """
+    if reason == getattr(mt5, "DEAL_REASON_TP", 5):
+        return "TP tercapai"
+    if reason == getattr(mt5, "DEAL_REASON_SL", 4):
+        return "trailing/BE" if net_idr > 0 else "SL kena"
+    if reason == getattr(mt5, "DEAL_REASON_SO", 6):
+        return "STOP OUT margin"
+    if reason == getattr(mt5, "DEAL_REASON_EXPERT", 3):
+        return "ditutup bot"
+    return "ditutup manual"
+
+
 def sync_closed_trades(days_back: int = 30, risk_per_trade_idr: float = 0.0,
-                       config: dict | None = None) -> int:
+                       config: dict | None = None) -> list[dict]:
     """
     Ambil posisi yang sudah tertutup dari MT5 dan catat yang belum ada.
 
-    Mengembalikan jumlah trade baru yang dicatat. Aman dipanggil berulang —
-    trade yang sudah tercatat dilewati.
+    Mengembalikan BARIS trade baru yang dicatat (kosong bila tidak ada).
+    Aman dipanggil berulang — trade yang sudah tercatat dilewati.
+
+    Tiap baris juga memuat "sebab" (TP/SL/trailing/ditutup bot) untuk
+    notifikasi. Kolom itu TIDAK ditulis ke CSV: skema journal dipakai
+    dashboard dan pembanding backtest, jadi sengaja tidak diubah.
     """
     LOG_DIR.mkdir(exist_ok=True)
 
@@ -130,7 +155,7 @@ def sync_closed_trades(days_back: int = 30, risk_per_trade_idr: float = 0.0,
 
     deals = mt5.history_deals_get(from_time, to_time)
     if deals is None:
-        return 0
+        return []
 
     # Kelompokkan SEMUA deal per posisi dulu (tanpa filter magic).
     #
@@ -217,22 +242,24 @@ def sync_closed_trades(days_back: int = 30, risk_per_trade_idr: float = 0.0,
             "comment": entry.comment,
             "magic": magic,
             "varian": varian,
+            # Tidak ditulis ke CSV - hanya untuk notifikasi (lihat _sebab_exit).
+            "sebab": _sebab_exit(getattr(exit_, "reason", -1), net),
         })
 
     if not new_rows:
-        return 0
+        return []
 
     new_rows.sort(key=lambda r: r["entry_time"])
     _migrate_schema_if_needed()
     write_header = not TRADES_CSV.exists()
 
     with open(TRADES_CSV, "a", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=FIELDS)
+        w = csv.DictWriter(f, fieldnames=FIELDS, extrasaction="ignore")
         if write_header:
             w.writeheader()
         w.writerows(new_rows)
 
-    return len(new_rows)
+    return new_rows
 
 
 def _migrate_schema_if_needed() -> None:
@@ -297,8 +324,8 @@ if __name__ == "__main__":
     if not mt5.initialize():
         raise SystemExit(f"Gagal connect MT5: {mt5.last_error()}")
 
-    n = sync_closed_trades()
-    print(f"Trade baru dicatat: {n}")
+    baru = sync_closed_trades()
+    print(f"Trade baru dicatat: {len(baru)}")
 
     s = summary()
     if s["total"]:

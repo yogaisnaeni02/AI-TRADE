@@ -308,6 +308,20 @@ setx AI_TRADE_TG_TOKEN   "123456:ABC..."
 setx AI_TRADE_TG_CHAT_ID "987654321"
 ```
 
+Tiap pesan diawali **nama PC + varian**, jadi notifikasi dari beberapa
+worker tidak tertukar. Yang dikirim:
+
+| Kejadian | Isi |
+|---|---|
+| Posisi dibuka | arah, lot, harga, SL/TP, RR, skor, risiko (% dan rupiah), tiket |
+| Posisi tertutup | sebab (TP, SL, trailing/BE, ditutup bot, ditutup manual), harga masuk → keluar, durasi, P/L dan R, trade + P/L hari ini, equity |
+| Kabar berkala | equity dan drawdown, posisi terbuka + floating, trade dan P/L hari ini, status rem, sesi |
+| Order gagal, HALT, bot start/stop | alasannya |
+
+Kabar berkala default tiap **1 jam**; ubah di `config/settings.yaml`
+(`telegram.heartbeat_jam`, `0` untuk mematikan). Gunanya bukan kenyamanan:
+kalau pesannya berhenti datang, berarti bot atau PC-nya mati.
+
 ## A8. Menghentikan
 
 | Cara | Efek |

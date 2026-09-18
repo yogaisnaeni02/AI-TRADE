@@ -224,3 +224,15 @@ mode: EXECUTOR                # OBSERVER -> ADVISOR -> EXECUTOR
 telegram:
   bot_token: "8808694293:AAFzSVseX61h6cOe-CJa-Y5kP3bBuxsc4BQ"
   chat_id: "6807301741"
+
+  # Kabar berkala "bot hidup" tiap berapa jam: equity, posisi terbuka,
+  # floating, trade dan P/L hari ini. 0 = dimatikan.
+  #
+  # Gunanya bukan kenyamanan: kalau pesannya berhenti datang, berarti bot
+  # atau PC-nya mati - dan itu ketahuan dalam hitungan jam, bukan setelah
+  # sehari penuh terlewat (kejadian 11 Sep 2026: PC macet, 11 trade
+  # terlewat tanpa ada yang tahu).
+  #
+  # Dengan beberapa PC worker, tiap PC mengirim kabarnya sendiri dan
+  # pesannya diberi label nama PC + varian.
+  heartbeat_jam: 1
