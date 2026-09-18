@@ -157,7 +157,9 @@ class Kendali:
                 f"\n{tanda} {w['nama']} — {stt.get('keadaan', 'belum ada kabar')}"
                 f" ({sw._teks_umur(umur)})"
             )
-            baris.append(f"varian {stt.get('varian') or '-'} · versi {stt.get('versi_bot') or '-'}")
+            tanda_versi = " (kode belum terbaru)" if sw.kode_tertinggal(stt, terbaru) else ""
+            baris.append(f"varian {stt.get('varian') or '-'} · versi "
+                         f"{stt.get('versi_bot') or '-'}{tanda_versi}")
             if snap:
                 baris.append(
                     f"equity {notifier.rupiah(float(snap.get('equity') or 0))}"

@@ -173,6 +173,11 @@ def main() -> int:
         "penugasan": penugasan,
         "file": manifest,
     }
+    # Sidik jari KODE saja (tanpa penugasan.yaml). Dipakai membandingkan
+    # worker dengan rilis: menambah PC baru mengubah versi, tapi tidak
+    # mengubah kode - worker yang penugasannya tidak berubah memang
+    # sengaja tidak restart, dan tidak boleh terbaca "versi lama".
+    info["sidik_kode"] = rilis.sidik_kode(info)
     hasil = rilis.cermin(REPO, tujuan, info, PERTAHANKAN_DI_RILIS)
     print(f"  Versi  : {info['versi']}")
     print(f"  File   : {len(manifest)} ({hasil['disalin']} disalin, {hasil['dihapus']} dihapus)")

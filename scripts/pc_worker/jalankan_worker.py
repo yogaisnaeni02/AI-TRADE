@@ -118,6 +118,10 @@ class Worker:
             "versi_bot": versi_bot.get("versi"),
             "commit_bot": versi_bot.get("commit"),
             "versi_rilis": versi_rilis.get("versi"),
+            # Sidik jari KODE yang sedang dijalankan; PC utama memakainya
+            # untuk tahu worker ini benar-benar tertinggal atau hanya
+            # versinya berbeda karena penugasan PC lain berubah.
+            "sidik_bot": rilis.sidik_kode(versi_bot) if versi_bot else None,
             "pid_bot": self.proses.pid if self.proses and self.proses.poll() is None else None,
             "python": sys.version.split()[0],
         }

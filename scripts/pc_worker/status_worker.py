@@ -123,6 +123,25 @@ def _teks_umur(d: Optional[timedelta]) -> str:
     return f"{menit // 60} jam lalu"
 
 
+def kode_tertinggal(stt: dict, terbaru: dict) -> bool:
+    """Worker ini menjalankan KODE yang lebih lama dari rilis terbaru?
+
+    Dibandingkan lewat sidik jari kode, bukan label versi: label versi
+    berubah setiap kali penugasan diterbitkan, termasuk penugasan PC LAIN.
+    Worker yang penugasannya tidak berubah memang sengaja tidak restart,
+    dan dulu terbaca "belum versi terbaru" padahal kodenya sama persis.
+
+    Worker versi lama belum mengirim sidik jari; untuk mereka label versi
+    dipakai sebagai perkiraan, seperti perilaku sebelumnya.
+    """
+    sidik_rilis = terbaru.get("sidik_kode")
+    sidik_bot = stt.get("sidik_bot")
+    if sidik_rilis and sidik_bot:
+        return sidik_bot != sidik_rilis
+    versi = stt.get("versi_bot")
+    return bool(versi and terbaru.get("versi") and versi != terbaru["versi"])
+
+
 def _baris_terakhir(folder: Path, kata: str) -> Optional[str]:
     logs = sorted(folder.glob("bot_*.log"))
     if not logs:
@@ -192,9 +211,7 @@ def tampilkan(api: Optional[st.Api], laporan: Path, rilis_dir: Path) -> None:
         keadaan = stt.get("keadaan", "?")
         print(f"  keadaan : {keadaan}{' - ' + stt['pesan'] if stt.get('pesan') else ''}")
         versi = stt.get("versi_bot")
-        catatan = ""
-        if versi and terbaru.get("versi") and versi != terbaru["versi"]:
-            catatan = "  !! belum versi terbaru"
+        catatan = "  !! kode belum terbaru" if kode_tertinggal(stt, terbaru) else ""
         print(f"  versi   : {versi or '?'}{catatan}")
         tugas = penugasan.get(kunci)
         if tugas != stt.get("varian"):

@@ -262,7 +262,7 @@ Tanda yang perlu diperhatikan:
 |---|---|
 | `!! BASI` | tidak ada kabar lebih dari 5 menit — PC mati, internet putus, atau worker ditutup |
 | `TIDAK TERHUBUNG` | Syncthing di PC itu tidak tersambung ke PC utama |
-| `!! belum versi terbaru` | wajar sesaat setelah menerbitkan; kalau lama, cek keadaannya |
+| `!! kode belum terbaru` | wajar sesaat setelah menerbitkan; kalau lama, cek keadaannya. Dibandingkan lewat sidik jari **kode** — menambah atau mengubah penugasan PC lain tidak membuat worker ini tertinggal |
 | `varian: X (penugasan: Y)` | worker belum pindah varian — biasanya masih menunggu posisi tutup |
 
 Arti **keadaan**:

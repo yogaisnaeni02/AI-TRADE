@@ -292,6 +292,25 @@ def test_bot_lama_yang_masih_hidup_tidak_didobel(tmp_path):
     assert w.keadaan == "bot_berhenti"
 
 
+def test_penugasan_pc_lain_tidak_membuat_worker_terbaca_tertinggal():
+    import status_worker as sw
+
+    rilis_lama = {"versi": "v1", "sidik_kode": "aaa"}
+    rilis_baru = {"versi": "v2", "sidik_kode": "aaa"}   # kode sama, penugasan beda
+    rilis_kode_baru = {"versi": "v3", "sidik_kode": "bbb"}
+    worker = {"versi_bot": "v1", "sidik_bot": "aaa"}
+
+    assert not sw.kode_tertinggal(worker, rilis_lama)
+    assert not sw.kode_tertinggal(worker, rilis_baru)
+    assert sw.kode_tertinggal(worker, rilis_kode_baru)
+
+    # Worker versi lama belum mengirim sidik jari -> jatuh ke label versi.
+    lawas = {"versi_bot": "v1"}
+    assert sw.kode_tertinggal(lawas, rilis_baru)
+    assert not sw.kode_tertinggal(lawas, rilis_lama)
+    assert not sw.kode_tertinggal({}, rilis_baru)
+
+
 # -- pilih dengan nomor ----------------------------------------------------------
 
 def test_pilih_varian_dengan_nomor_atau_nama():

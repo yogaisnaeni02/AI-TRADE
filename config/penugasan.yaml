@@ -20,3 +20,7 @@
 # Contoh:
 #   pc-kantor: dua_arah_konfluensi
 #   pc3: pyramid5
+
+pc-atas-kanan-kecil: dua_arah_konfluensi
+pc-counter: baseline
+pc-smk: konfluensi
