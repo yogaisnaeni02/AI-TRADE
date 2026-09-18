@@ -16,7 +16,9 @@ import io
 import json
 import os
 import platform
+import ssl
 import subprocess
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -43,9 +45,56 @@ class GagalSyncthing(RuntimeError):
 # -- unduh ----------------------------------------------------------------
 
 def _ambil(url: str, timeout: int = 60) -> bytes:
+    """Unduh berkas; kalau verifikasi sertifikat gagal, coba lewat Windows.
+
+    KENAPA ADA (18 Sep 2026): pemasangan di satu PC kantor gagal dengan
+    CERTIFICATE_VERIFY_FAILED saat mengunduh Syncthing, padahal browser di
+    PC yang sama bisa membuka alamat itu. Python memakai penyimpanan
+    sertifikatnya sendiri; proxy kantor yang menandatangani ulang HTTPS -
+    atau Windows yang belum pernah mengambil root CA-nya - tidak terbaca
+    dari sana.
+
+    curl.exe (bawaan Windows 10 1803+) dan PowerShell memakai penyimpanan
+    sertifikat WINDOWS, yang justru sudah memuat sertifikat proxy kantor.
+    Isi unduhannya tetap dicocokkan dengan sha256 rilis resmi setelahnya,
+    jadi jalur cadangan ini tidak melonggarkan pemeriksaan keaslian berkas.
+    """
     req = urllib.request.Request(url, headers={"User-Agent": "ai-trade-worker"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.read()
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read()
+    except urllib.error.URLError as e:
+        if not isinstance(getattr(e, "reason", None), ssl.SSLCertVerificationError):
+            raise
+    return _ambil_lewat_windows(url, timeout)
+
+
+def _ambil_lewat_windows(url: str, timeout: int = 60) -> bytes:
+    """Unduh memakai curl.exe atau PowerShell - keduanya percaya CA Windows."""
+    galat: list[str] = []
+    with tempfile.TemporaryDirectory() as tmp:
+        keluar = Path(tmp) / "unduh.bin"
+        curl = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "curl.exe"
+        perintah = []
+        if curl.exists():
+            perintah.append([str(curl), "-fsSL", "--max-time", str(timeout),
+                             "-o", str(keluar), url])
+        perintah.append([
+            "powershell", "-NoProfile", "-NonInteractive", "-Command",
+            "$ProgressPreference='SilentlyContinue'; "
+            f"Invoke-WebRequest -UseBasicParsing -Uri '{url}' -OutFile '{keluar}'",
+        ])
+        for p in perintah:
+            try:
+                hasil = subprocess.run(p, capture_output=True, text=True,
+                                       timeout=timeout + 60, creationflags=_TANPA_JENDELA)
+            except (OSError, subprocess.SubprocessError) as e:
+                galat.append(f"{Path(p[0]).name}: {e}")
+                continue
+            if hasil.returncode == 0 and keluar.exists() and keluar.stat().st_size:
+                return keluar.read_bytes()
+            galat.append(f"{Path(p[0]).name}: {(hasil.stderr or hasil.stdout).strip()[-200:]}")
+    raise GagalSyncthing("unduhan gagal, termasuk lewat Windows: " + " | ".join(galat))
 
 
 def _arsitektur() -> str:

@@ -73,6 +73,36 @@ def test_label_pc_dan_varian_ikut_di_tiap_pesan(monkeypatch):
     assert "PC+Kantor" in isi and "dua_arah_konfluensi" in isi
 
 
+def test_sertifikat_gagal_dialihkan_ke_curl_windows(monkeypatch):
+    """PC dengan proxy penyaring HTTPS tetap bisa mengirim notifikasi."""
+    import ssl
+    import urllib.error
+    import urllib.request
+
+    segar = _notifier_segar()
+    monkeypatch.setattr(segar, "_load_telegram_config", lambda: ("token", "chat"))
+
+    def gagal_sertifikat(req, **kw):  # noqa: ARG001
+        raise urllib.error.URLError(ssl.SSLCertVerificationError("verify failed"))
+
+    monkeypatch.setattr(urllib.request, "urlopen", gagal_sertifikat)
+    dipakai = {}
+    def curl_palsu(url, data):
+        dipakai["url"] = url
+        return True
+
+    monkeypatch.setattr(segar, "_kirim_lewat_windows", curl_palsu)
+    assert segar.send("halo") is True
+    assert "api.telegram.org" in dipakai["url"]
+
+    # Kegagalan lain (mis. jaringan mati) TIDAK memakai jalur cadangan.
+    dipakai.clear()
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda req, **kw: (_ for _ in ()).throw(urllib.error.URLError("mati")))
+    assert segar.send("halo") is False
+    assert not dipakai
+
+
 def test_set_varian_bisa_dikosongkan():
     notifier.set_varian("konfluensi")
     assert notifier._VARIAN == "konfluensi"

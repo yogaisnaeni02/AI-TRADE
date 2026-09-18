@@ -111,22 +111,52 @@ def send(message: str) -> bool:
     if not token:
         return False
 
+    import ssl
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    kepala = f"🖥 <b>{_LABEL}</b>" + (f" · {_VARIAN}" if _VARIAN else "")
+    data = urllib.parse.urlencode({
+        "chat_id": chat_id,
+        "text": f"{kepala}\n{message}",
+        "parse_mode": "HTML",
+    }).encode()
+
     try:
-        import urllib.request
-        import urllib.parse
-
-        url = f"https://api.telegram.org/bot{token}/sendMessage"
-        kepala = f"🖥 <b>{_LABEL}</b>" + (f" · {_VARIAN}" if _VARIAN else "")
-        data = urllib.parse.urlencode({
-            "chat_id": chat_id,
-            "text": f"{kepala}\n{message}",
-            "parse_mode": "HTML",
-        }).encode()
-
         req = urllib.request.Request(url, data=data)
         with urllib.request.urlopen(req, timeout=10) as resp:
             return resp.status == 200
+    except urllib.error.URLError as e:
+        # Sertifikat tidak bisa diverifikasi Python (proxy kantor yang
+        # menandatangani ulang HTTPS, atau root CA belum ada di Windows).
+        # curl.exe memakai penyimpanan sertifikat Windows, yang justru
+        # sudah memuat sertifikat proxy itu. Tanpa cadangan ini, bot di PC
+        # seperti itu berjalan TANPA notifikasi sama sekali, dan diamnya
+        # tidak bisa dibedakan dari bot yang mati.
+        if isinstance(getattr(e, "reason", None), ssl.SSLCertVerificationError):
+            return _kirim_lewat_windows(url, data)
+        return False
     except Exception:  # noqa: BLE001
+        return False
+
+
+def _kirim_lewat_windows(url: str, data: bytes) -> bool:
+    import os
+    import subprocess
+
+    curl = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "curl.exe"
+    if not curl.exists():
+        return False
+    try:
+        hasil = subprocess.run(
+            [str(curl), "-fsS", "--max-time", "15", "-X", "POST", "--data-binary", "@-", url],
+            input=data, capture_output=True, timeout=30,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        return hasil.returncode == 0
+    except (OSError, subprocess.SubprocessError):
         return False
 
 

@@ -311,6 +311,45 @@ def test_penugasan_pc_lain_tidak_membuat_worker_terbaca_tertinggal():
     assert not sw.kode_tertinggal({}, rilis_baru)
 
 
+def test_unduhan_dialihkan_ke_windows_saat_sertifikat_gagal(monkeypatch, tmp_path):
+    """PC kantor dengan proxy HTTPS tetap bisa mengunduh Syncthing."""
+    import ssl
+    import subprocess as sp
+    import urllib.error
+    import urllib.request
+
+    import syncthing_alat as st
+
+    def gagal_sertifikat(req, **kw):  # noqa: ARG001
+        raise urllib.error.URLError(ssl.SSLCertVerificationError("verify failed"))
+
+    monkeypatch.setattr(urllib.request, "urlopen", gagal_sertifikat)
+
+    dipakai = []
+
+    def jalan_palsu(perintah, **kw):
+        dipakai.append(Path(perintah[0]).name)
+        keluar = perintah[perintah.index("-o") + 1] if "-o" in perintah else None
+        if keluar:
+            Path(keluar).write_bytes(b"isi berkas")
+        return subprocess.CompletedProcess(perintah, 0, "", "")
+
+    monkeypatch.setattr(sp, "run", jalan_palsu)
+    # curl.exe bawaan Windows dipalsukan lewat SystemRoot, bukan dengan
+    # menambal Path.exists - penambalan itu ikut mengenai berkas unduhan.
+    (tmp_path / "System32").mkdir()
+    (tmp_path / "System32" / "curl.exe").write_bytes(b"")
+    monkeypatch.setenv("SystemRoot", str(tmp_path))
+    assert st._ambil("https://contoh/berkas.zip") == b"isi berkas"
+    assert dipakai == ["curl.exe"]
+
+    # Kegagalan jaringan biasa tetap dilempar, bukan diam-diam dialihkan.
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda req, **kw: (_ for _ in ()).throw(urllib.error.URLError("mati")))
+    with pytest.raises(urllib.error.URLError):
+        st._ambil("https://contoh/berkas.zip")
+
+
 # -- pilih dengan nomor ----------------------------------------------------------
 
 def test_pilih_varian_dengan_nomor_atau_nama():
