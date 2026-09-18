@@ -62,3 +62,6 @@ logs/trades_gabungan.csv
 laporan/
 pc_utama.json
 PASANG-WORKER.bat
+
+# Posisi terakhir perintah Telegram yang sudah diproses (per-PC).
+logs/tg_kendali.json

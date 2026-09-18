@@ -89,6 +89,7 @@ Empat file di PC utama:
 | `UTAMA-2-TERBITKAN.bat` | setiap ada perubahan kode atau config untuk worker |
 | `UTAMA-3-STATUS-WORKER.bat` | menerima worker baru dan memantau semua worker |
 | `UTAMA-4-ATUR-VARIAN-WORKER.bat` | memilih varian tiap worker dengan nomor |
+| `UTAMA-5-KENDALI-TELEGRAM.bat` | opsional: melihat dan mengganti varian dari Telegram (A11) |
 
 `PASANG-WORKER.bat` berisi ID Syncthing PC utama ini, jadi file itu tidak
 ikut Git. Kalau hilang, buat ulang dengan:
@@ -369,6 +370,45 @@ folder baru dan pindahkan journal seperti A9.
 
 **Menghapus worker:** tutup jendela worker, hapus shortcut *AI-TRADE* di
 `shell:startup` dan desktop, lalu hapus folder `AI-TRADE-WORKER`.
+
+## A11. Kendali dari Telegram (opsional)
+
+Klik dua kali **`UTAMA-5-KENDALI-TELEGRAM.bat`** di PC utama, lalu biarkan
+jendelanya terbuka. Perintahnya ditarik berkala dari Telegram, jadi tidak
+perlu IP publik atau port terbuka.
+
+| Perintah | Isi |
+|---|---|
+| `/status` | keadaan tiap worker, versi, varian, kabar terakhir |
+| `/saldo` | equity, balance, posisi terbuka, floating, total semua akun |
+| `/hariini` | trade dan P/L hari ini per PC dan totalnya |
+| `/minggu` | P/L minggu ini dibanding rem mingguan |
+| `/total` | P/L keseluruhan, winrate, profit factor, rincian per varian |
+| `/trade` | 5 trade terakhir (`/trade 10` untuk lebih banyak) |
+| `/rem` | trade hari ini, loss beruntun, drawdown, status halt |
+| `/varian` | daftar PC dan varian, keduanya bernomor |
+| `/varian 1 5` | PC nomor 1 memakai varian nomor 5, lalu diterbitkan |
+| `/berhenti 1` | PC nomor 1 berhenti menjalankan bot |
+
+Nomor varian sama dengan nomor di `UTAMA-4-ATUR-VARIAN-WORKER.bat` dan
+`5-JALANKAN-VARIAN.bat`.
+
+Yang perlu diketahui:
+
+- **Hanya chat yang terdaftar** (`telegram.chat_id` di `config/settings.yaml`
+  atau env `AI_TRADE_TG_CHAT_ID`) yang dilayani; pesan dari chat lain
+  diabaikan dan dicatat di jendela.
+- **Tidak ada perintah yang menutup posisi, melepas halt drawdown, atau
+  mematikan worker.** Satu salah ketik dari HP tidak boleh bisa
+  mengakhiri posisi yang sedang berjalan — itu tetap lewat PC utama.
+- **Mengganti varian ikut menerbitkan rilis**, jadi tesnya dijalankan dulu
+  dan balasan datang setelah belasan detik. Kalau tes gagal, varian tetap
+  tersimpan tapi tidak diterbitkan, dan balasannya menyebutkan itu.
+- **Kalau PC utama mati**, perintah mengantre di Telegram dan diproses saat
+  menyala lagi. Perintah yang lebih tua dari 6 jam diabaikan, supaya
+  perintah kemarin tidak mendadak berjalan hari ini.
+- **Jalankan hanya di satu PC.** Dua program yang menarik perintah dari bot
+  Telegram yang sama akan saling berebut pesan.
 
 ---
 
