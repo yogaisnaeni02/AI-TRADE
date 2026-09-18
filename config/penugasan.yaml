@@ -1,0 +1,22 @@
+# Penugasan PC worker: PC mana menjalankan varian apa.
+#
+# Dibaca oleh PC WORKER (scripts/pc_worker/jalankan_worker.py) setelah
+# UTAMA-2-TERBITKAN.bat dijalankan di PC utama. Worker yang bot-nya
+# sedang berjalan pindah varian begitu tidak ada posisi terbuka.
+#
+# Format (sengaja sederhana - dibaca tanpa PyYAML di worker):
+#
+#   <kunci-pc>: <nama varian>
+#
+# - <kunci-pc> = nama PC huruf kecil, spasi jadi tanda minus. Kuncinya
+#   ditampilkan saat pemasangan worker dan di UTAMA-3-STATUS-WORKER.bat.
+#   Contoh: "PC Kantor" -> pc-kantor
+# - <nama varian> = salah satu nama di config/variants.yaml, atau
+#   `berhenti` untuk menyuruh worker itu tidak menjalankan bot.
+# - PC yang tidak tercantum di sini TIDAK menjalankan bot (menunggu).
+#
+# PERINGATAN: satu akun MT5 hanya boleh dipakai SATU PC (docs/51).
+#
+# Contoh:
+#   pc-kantor: dua_arah_konfluensi
+#   pc3: pyramid5

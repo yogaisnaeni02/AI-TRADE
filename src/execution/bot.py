@@ -39,6 +39,7 @@ from ..strategy import sessions, structure
 from ..monitoring import notifier
 from ..monitoring.journal import posisi_tertutup, sync_closed_trades
 from ..strategy.setups import RuleEngine
+from ..versi_kode import KODE_UPDATE, alasan_restart, teks_versi
 from .manajemen_posisi import ParamPosisi, putuskan, skor_awal_dari_data
 from .order_manager import OrderManager
 
@@ -71,6 +72,11 @@ class TradingBot:
 
         self.cfg, self._magic, self._variant_meta = resolve_variant(variant, base_cfg)
         self.variant_name = variant or "baseline"
+
+        # Tiap notifikasi menyebut varian ini. Beberapa PC menjalankan
+        # varian berbeda, jadi "TP +Rp 120.000" tanpa nama varian tidak
+        # bisa dihubungkan ke setelan mana pun.
+        notifier.set_varian(self.variant_name)
 
         # Batas risiko juga bisa di-override per varian lewat `override_risk`
         # (mis. max_open_positions). Dipisah dari `override` karena
@@ -119,6 +125,7 @@ class TradingBot:
 
         self._last_bar_time: Optional[pd.Timestamp] = None
         self._halt_notified = False
+        self._update_menunggu_dilog = False
         self._entry_info: dict[int, dict] = {}  # ticket -> {entry, sl_dist, be_done}
         self._masalah: dict[str, tuple[str, float]] = {}  # sumber -> (pesan, waktu lapor)
 
@@ -153,6 +160,33 @@ class TradingBot:
 
     def stop_requested(self) -> bool:
         return STOP_FILE.exists()
+
+    def _siap_berhenti_untuk_update(self) -> bool:
+        """PC worker meminta restart untuk kode/penugasan baru?
+
+        Hanya dipenuhi saat bot ini TIDAK punya posisi terbuka. Posisi yang
+        ditinggal bot kehilangan trailing, break-even, dan max_bars_hold -
+        tinggal SL/TP di server. Selama masih ada posisi, permintaan
+        ditunda (dicatat sekali) dan dicek lagi tiap siklus.
+
+        Di luar PC worker file flag itu tidak pernah ada, jadi perilaku
+        bot yang dijalankan lewat .bat biasa tidak berubah.
+        """
+        alasan = alasan_restart(LOG_DIR)
+        if alasan is None or self.orders is None:
+            self._update_menunggu_dilog = False
+            return False
+        try:
+            n_open = len(self.orders.get_positions())
+        except Exception:  # noqa: BLE001
+            return False
+        if n_open:
+            if not self._update_menunggu_dilog:
+                self.log(f"Worker meminta restart ({alasan}) - menunggu {n_open} posisi tertutup.")
+                self._update_menunggu_dilog = True
+            return False
+        self.log(f"Worker meminta restart ({alasan}) - tidak ada posisi terbuka, bot berhenti.")
+        return True
 
     def write_snapshot(self) -> None:
         """Tulis state ke JSON agar dashboard bisa membacanya tanpa
@@ -426,7 +460,7 @@ class TradingBot:
         else:
             self.log(f"[status] {wib:%H:%M} WIB | sesi {row['session']} — semua syarat OK")
 
-    HB_TELEGRAM_JAM = 4          # kirim ringkasan tiap 4 jam
+    HB_TELEGRAM_JAM = 1          # bawaan; diatur di settings.yaml telegram.heartbeat_jam
 
     def _heartbeat_telegram(self, df) -> None:
         """
@@ -446,29 +480,39 @@ class TradingBot:
         try:
             import time as _t
             sekarang = _t.time()
-            if sekarang - getattr(self, "_hb_tg_terakhir", 0.0) < self.HB_TELEGRAM_JAM * 3600:
+            jeda_jam = float(
+                self.cfg.get("telegram", {}).get("heartbeat_jam", self.HB_TELEGRAM_JAM)
+            )
+            if jeda_jam <= 0:
+                return  # 0 = kabar berkala dimatikan
+            if sekarang - getattr(self, "_hb_tg_terakhir", 0.0) < jeda_jam * 3600:
                 return
             self._hb_tg_terakhir = sekarang
 
             acc = mt5.account_info()
             equity = acc.equity if acc else 0.0
-            n_pos = len(self.orders.get_positions()) if self.orders else 0
+            posisi = self.orders.get_positions() if self.orders else []
+            # Floating P/L posisi yang masih terbuka: tanpa ini "equity"
+            # saja tidak cukup untuk tahu sedang menang atau kalah.
+            floating = sum(p.profit for p in posisi)
             st = self.risk.state
             baris = df.iloc[-1]
             wib = pd.Timestamp(baris["time_utc"]) + pd.Timedelta(hours=7)
 
-            pesan = [
-                f"AI-TRADE hidup | {wib:%d %b %H:%M} WIB",
-                f"cfg {self.cfg_hash} | {self.mode} | {self.symbol}",
-                f"equity Rp {equity:,.0f} "
-                f"(DD {self.risk.current_drawdown_pct(equity):.1f}%)",
-                f"hari ini {st.day_trades}/{self.risk.max_daily_trades} trade, "
-                f"P/L Rp {st.day_pnl:,.0f}",
-                f"posisi terbuka {n_pos} | sesi {baris.get('session', '?')}",
-            ]
-            if st.halted:
-                pesan.append(f"HALT: {st.halt_reason}")
-            notifier.send(chr(10).join(pesan))
+            notifier.notify_heartbeat(
+                waktu=f"{wib:%d %b %H:%M} WIB",
+                equity=equity,
+                dd_pct=self.risk.current_drawdown_pct(equity),
+                posisi=len(posisi),
+                floating=floating,
+                trade_hari_ini=st.day_trades,
+                batas_trade=self.risk.max_daily_trades,
+                pnl_hari_ini=st.day_pnl,
+                rem=self._teks_rem_rugi(),
+                sesi=str(baris.get("session", "?")),
+                cfg_hash=self.cfg_hash,
+                halt=st.halt_reason if st.halted else None,
+            )
         except Exception:  # noqa: BLE001
             pass
 
@@ -524,18 +568,44 @@ class TradingBot:
         self.risk.refresh_from_journal(datetime.now(), trades=baris)
 
         try:
-            n = sync_closed_trades(days_back=7, config=self.cfg, rows=baris)
+            baris_baru = sync_closed_trades(days_back=7, config=self.cfg, rows=baris)
         except Exception as e:  # noqa: BLE001
             self._lapor_masalah(sumber_csv, e)
             return
         self._pulih(sumber_csv)
-        if n:
-            self.log(f"Journal: {n} trade baru dicatat")
+        if baris_baru:
+            self.log(f"Journal: {len(baris_baru)} trade baru dicatat")
             self.log(
                 f"  Rem: {self.risk.state.day_trades}/{self.risk.max_daily_trades} trade"
                 f" | P/L Rp {self.risk.state.day_pnl:,.0f}"
                 f" | {self._teks_rem_rugi()}"
             )
+            self._kabari_posisi_tutup(baris_baru)
+
+    def _kabari_posisi_tutup(self, baris: list[dict]) -> None:
+        """Kirim hasil tiap posisi yang baru tertutup ke Telegram.
+
+        Hanya posisi milik VARIAN INI (magic-nya sendiri). Satu akun demo
+        bisa dipakai beberapa varian dan trade manual pemilik; mengabarkan
+        semuanya membuat notifikasi tiap bot salah menceritakan hasil bot
+        lain.
+        """
+        acc = mt5.account_info()
+        equity = acc.equity if acc else 0.0
+        for r in baris:
+            try:
+                if int(r.get("magic", 0)) != int(self._magic):
+                    continue
+                notifier.notify_exit(
+                    r.get("sebab", "ditutup"), r.get("direction", ""), r.get("lot", 0),
+                    float(r.get("entry_price", 0)), float(r.get("exit_price", 0)),
+                    float(r.get("net_idr", 0)), r.get("r_multiple"),
+                    float(r.get("duration_min", 0)),
+                    self.risk.state.day_trades, self.risk.state.day_pnl, equity,
+                )
+            except Exception:  # noqa: BLE001
+                # Notifikasi tidak boleh menghentikan loop trading.
+                continue
 
     def process_bar(self, df: pd.DataFrame) -> None:
         # manage_positions() TIDAK dipanggil di sini lagi - sudah dijalankan
@@ -620,10 +690,6 @@ class TradingBot:
                 notifier.notify_halt(self.risk.state.halt_reason)
             return
 
-        notifier.notify_signal(
-            sig['direction'], sig['setup'], sig.get('size_tier', 'full'),
-            decision.lot, sig['sl'], sig['tp'],
-        )
         self.log(
             f"SINYAL {sig['direction'].upper()} {sig['setup']} "
             f"tier={sig.get('size_tier','full')} skor={sig['score']} "
@@ -644,7 +710,18 @@ class TradingBot:
             comment=f"{sig['setup']}_{sig['score']}_{self.cfg_hash}",
         )
 
-        notifier.notify_order_result(result.success, result.ticket, result.price, result.comment)
+        # Satu notifikasi per entry, dikirim setelah posisi BENAR-BENAR
+        # terbuka - bukan dua (sinyal + hasil order) seperti sebelumnya.
+        if result.success:
+            notifier.notify_entry(
+                sig["direction"], sig["setup"], sig.get("size_tier", "full"),
+                sig["score"], decision.lot, result.price, sig["sl"], sig["tp"],
+                decision.risk_pct, acc.equity * decision.risk_pct / 100.0,
+                result.ticket,
+            )
+        else:
+            notifier.notify_order_gagal(result.comment)
+
         if result.success:
             self.risk.record_order_success()
             self._entry_info[result.ticket] = {
@@ -747,6 +824,7 @@ class TradingBot:
 
         self.log("=" * 58)
         self.log(f"BOT START — mode {self.mode} — VARIAN: {self.variant_name}")
+        self.log(f"Versi kode: {teks_versi(ROOT)}")
         self.log(f"Akun {acc.login} @ {acc.server} ({'DEMO' if is_demo else 'REAL'})")
         self.log(f"Equity Rp {acc.equity:,.0f} | simbol {self.symbol}")
         self.log(f"Setup: {self.allowed_setups} skor {self.min_score}-{self.max_score}")
@@ -823,6 +901,7 @@ class TradingBot:
             "mt5_disconnect_seconds",
             self.risk.risk.get("circuit_breaker", {}).get("mt5_disconnect_seconds", 30),
         )
+        keluar_untuk_update = False
 
         try:
             while True:
@@ -872,6 +951,10 @@ class TradingBot:
                     self._sinkron_rem_dan_journal()
 
                     self.risk.save_state()
+
+                    if self._siap_berhenti_untuk_update():
+                        keluar_untuk_update = True
+                        break
 
                 except Exception as e:  # noqa: BLE001
                     # JANGAN biarkan reconnect mematikan bot.
@@ -959,6 +1042,11 @@ class TradingBot:
 
             self.gw.disconnect()
             self._release_lock()
+
+        # Kode keluar khusus agar peluncur worker tahu ini berhenti untuk
+        # update, bukan crash - lalu langsung memasang versi baru.
+        if keluar_untuk_update:
+            raise SystemExit(KODE_UPDATE)
 
 
 if __name__ == "__main__":

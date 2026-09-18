@@ -53,3 +53,15 @@ catboost_info/
 # kebutuhan analisis lokal, bukan sebagai sumber data bot.
 docs/AnalisaLog/trades_gabungan.csv
 logs/trades_gabungan.csv
+
+# Jaringan PC utama <-> worker (scripts/pc_worker, docs/51 bagian A).
+# Semuanya setelan/data PER-PC utama, bukan proyek:
+# - laporan/          kiriman Syncthing dari worker (journal, log, status)
+# - pc_utama.json     lokasi Syncthing & folder rilis PC utama ini
+# - PASANG-WORKER.bat berisi ID Syncthing PC utama ini
+laporan/
+pc_utama.json
+PASANG-WORKER.bat
+
+# Posisi terakhir perintah Telegram yang sudah diproses (per-PC).
+logs/tg_kendali.json
